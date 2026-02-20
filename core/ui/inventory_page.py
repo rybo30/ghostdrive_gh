@@ -41,7 +41,7 @@ class InventoryPage(QWidget):
 
         # 2. Search bar
         self.search_bar = QLineEdit()
-        self.search_bar.setPlaceholderText("Search inventory...")
+        self.search_bar.setPlaceholderText("Search...")
         self.search_bar.setStyleSheet(f"""
             QLineEdit {{
                 background-color: {COLOR_BUTTON}; 
@@ -103,8 +103,9 @@ class InventoryPage(QWidget):
             }}
             QHeaderView::section {{
                 background-color: {COLOR_ACCENT};
-                color: white;
+                color: #000000;  /* Changed from white to black */
                 border: 1px solid {COLOR_BG};
+                font-weight: bold; /* Optional: adds extra 'pop' against the green */
             }}
         """)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)

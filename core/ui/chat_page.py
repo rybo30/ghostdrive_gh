@@ -3,12 +3,11 @@ import re
 import random
 import string
 
-# --- Style Imports ---
-from . import style_config
 from .style_config import (
-    FONT_FAMILY, FONT_SIZE,
-    COLOR_BG, COLOR_FG, COLOR_ACCENT, COLOR_BUTTON, COLOR_PAGE_BG, COLOR_HIGHLIGHT, COLOR_PROTOCOL,
-    STYLE_LABEL, STYLE_BUTTON
+    T, FONT_FAMILY, FONT_SIZE, 
+    STYLE_BUTTON, STYLE_INPUT, STYLE_LABEL,
+    COLOR_BG, COLOR_FG, COLOR_ACCENT, COLOR_BUTTON, 
+    COLOR_HIGHLIGHT, COLOR_BORDER, COLOR_PROTOCOL, COLOR_PAGE_BG
 )
 
 from PySide6.QtWidgets import (
@@ -22,12 +21,12 @@ from PySide6.QtGui import QTextCursor, QTextOption, QFont, QPixmap
 # --- System Imports ---
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'Everything_else'))
 from Everything_else.command_checker import check_for_commands
-from Everything_else.jynx_operator_ui import execute_command, get_random_prompt
+from Everything_else.jynx_operator_ui import execute_command, get_random_prompt, soul_vent, soul_vent_summon
 from Everything_else.model_registry import load_model_from_config, get_model_config, get_visual_description
 from Everything_else.ai_council import run_council_streaming
 
 # =====================================================================
-# Workers (Normal & Council) - Logic Preserved
+# Workers (Logic Preserved & Hardened)
 # =====================================================================
 class StreamWorker(QObject):
     token_received = Signal(str)
@@ -44,6 +43,8 @@ class StreamWorker(QObject):
 
     def run(self):
         try:
+            if not self.llm_fn:
+                raise Exception("LLM Engine not initialized.")
             for chunk in self.llm_fn(
                 self.prompt, 
                 max_tokens=self.max_tokens, 
@@ -71,17 +72,15 @@ class CouncilStreamWorker(QObject):
     finished = Signal()
     error = Signal(str)
 
-    # Add username and fernet to the parentheses here:
     def __init__(self, user_prompt, image_path=None, username="Operator", fernet=None):
         super().__init__()
         self.user_prompt = user_prompt
         self.image_path = image_path
-        self.username = username  # Now it knows what 'username' is
-        self.fernet = fernet      # Now it knows what 'fernet' is
+        self.username = username 
+        self.fernet = fernet 
 
     def run(self):
         try:
-            # This part is now perfect
             for event in run_council_streaming(
                 self.user_prompt, 
                 image_path=self.image_path, 
@@ -94,7 +93,7 @@ class CouncilStreamWorker(QObject):
             self.error.emit(str(e))
 
 # =====================================================================
-# Main ChatPage UI - THEME UPDATED
+# Main ChatPage UI
 # =====================================================================
 class ChatPage(QWidget):
     def __init__(self, username, passphrase, fernet, debug=False):
@@ -107,223 +106,149 @@ class ChatPage(QWidget):
         self.llm = None
         self.current_image_path = None 
         self.model_config = get_model_config("jynx_default")
-        self.max_tokens = self.model_config.get("max_tokens", 4096)
+
+        # --- ADD THESE LINES ---
+        self.max_tokens = self.model_config.get("max_tokens", 2048)
         self.temperature = self.model_config.get("temperature", 0.7)
+        
+        self._active_thread = None
+        self._active_worker = None
 
         self.setAcceptDrops(True)
+        self.init_ui()
+        QTimer.singleShot(500, self.deferred_load)
 
-        # Main Layout Setup
+    def init_ui(self):
+        # 1. Main Layout - Zero margins to stop the "box in a box" look
         self.main_layout = QVBoxLayout(self)
+        self.main_layout.setContentsMargins(20, 10, 20, 20)
+        self.main_layout.setSpacing(10)
 
-        # 1. Chat Area
+        # 2. Chat Area - No border, transparent background
         self.chat_area = QTextEdit()
         self.chat_area.setReadOnly(True)
         self.chat_area.setFont(QFont(FONT_FAMILY, FONT_SIZE))
+        self.chat_area.setObjectName("ChatDisplay") # We will style this in QSS
         self.main_layout.addWidget(self.chat_area)
 
-        # 2. Status Row
-        self.status_label = QLabel("● System Initializing...")
-        self.main_layout.addWidget(self.status_label)
-
+        # 3. Status/Loading - Muted slate colors
+        status_container = QHBoxLayout()
+        self.status_label = QLabel("● SYSTEM INITIALIZING...")
         self.loading_label = QLabel("")
-        self.main_layout.addWidget(self.loading_label)
+        status_container.addWidget(self.status_label)
+        status_container.addStretch()
+        status_container.addWidget(self.loading_label)
+        self.main_layout.addLayout(status_container)
 
-        # 3. Image Preview Area
         self.image_preview = QLabel()
         self.image_preview.setFixedHeight(100)
         self.image_preview.setAlignment(Qt.AlignCenter)
         self.image_preview.hide()
         self.main_layout.addWidget(self.image_preview)
 
-        # 4. Input Box
+        # 4. Input Line - Use the specific ObjectName for consistent styling
         self.input_line = QTextEdit()
         self.input_line.installEventFilter(self)
-        self.input_line.setPlaceholderText("Type a message and/or drop an image...")
-        self.input_line.setFixedHeight(60)
+        self.input_line.setPlaceholderText("TYPE MESSAGE OR DROP IMAGE...")
+        self.input_line.setFixedHeight(80)
+        self.input_line.setObjectName("ChatInput")
         self.main_layout.addWidget(self.input_line)
 
-        # 5. Buttons
-        self.send_button = QPushButton("Send")
-        self.send_button.setEnabled(False)
-        self.send_button.clicked.connect(self.handle_prompt)
-
-        self.protocol_button = QPushButton("Run Protocol")
-        self.protocol_button.clicked.connect(self.manual_protocol_trigger)
-
-        self.reason_button = QPushButton("Reason")
-        self.reason_button.setEnabled(False)
-        self.reason_button.clicked.connect(self.handle_reason)
-
-        self.attach_btn = QPushButton("+")
-        self.attach_btn.setFixedSize(35, 35)
-        self.attach_btn.clicked.connect(self.open_file_dialog)
-
+        # 5. UNIFIED BUTTONS (Fixes your size issue)
         self.btns = QHBoxLayout()
-        self.btns.addWidget(self.attach_btn)
-        self.btns.addWidget(self.send_button)
-        self.btns.addWidget(self.protocol_button)
-        self.btns.addWidget(self.reason_button)
+        self.btns.setSpacing(8) # Space between buttons
+        
+        # Attach Button (+)
+        self.attach_btn = QPushButton("+")
+        self.attach_btn.setObjectName("PlusBtn")
+        
+        # Main Actions
+        self.send_button = QPushButton("SEND")
+        self.protocol_button = QPushButton("PROTOCOL")
+        self.reason_button = QPushButton("REASON")
+
+        for b in [self.send_button, self.protocol_button, self.reason_button]:
+            b.setObjectName("ChatActionBtn") # Force them to use the CSS rule
+            b.setEnabled(False)
+            self.btns.addWidget(b)
+        
+        # Insert the + at the start of the row
+        self.btns.insertWidget(0, self.attach_btn)
         self.main_layout.addLayout(self.btns)
 
-        # APPLY THEME INITIALLY
+        # Connections
+        self.attach_btn.clicked.connect(self.open_file_dialog)
+        self.send_button.clicked.connect(self.handle_prompt)
+        self.protocol_button.clicked.connect(self.manual_protocol_trigger)
+        self.reason_button.clicked.connect(self.handle_reason)
+        
         self.apply_dynamic_theme()
-        QTimer.singleShot(500, self.deferred_load)
 
-    def showEvent(self, event):
-        super().showEvent(event)
-        self.apply_dynamic_theme()
-
-    def apply_dynamic_theme(self, theme_dict=None):
-        """Updates the UI colors using a theme dictionary instead of static files."""
-        # Fallback to current config if no dict is provided
-        if theme_dict is None:
-            importlib.reload(style_config)
-            theme_dict = {
-                "COLOR_BG": style_config.COLOR_BG,
-                "COLOR_FG": style_config.COLOR_FG,
-                "COLOR_ACCENT": style_config.COLOR_ACCENT,
-                "COLOR_BUTTON": style_config.COLOR_BUTTON,
-                "COLOR_BORDER": getattr(style_config, "COLOR_BORDER", "#d1d1d1")
-            }
-
-        bg = theme_dict.get("COLOR_BG")
-        fg = theme_dict.get("COLOR_FG")
-        accent = theme_dict.get("COLOR_ACCENT")
-        btn_base = theme_dict.get("COLOR_BUTTON")
-        border = theme_dict.get("COLOR_BORDER", accent) # Use border if exists, else accent
-
-        # 1. Main Page Background
-        self.setStyleSheet(f"background-color: {bg}; border: none;")
-
-        # 2. Chat & Input Areas (The text boxes)
-        box_style = f"""
-            QTextEdit {{
-                background-color: {btn_base}; 
-                color: {fg};
-                border: 1px solid {border};
+    def apply_dynamic_theme(self):
+        """Removes hardcoded whites and enforces the theme dictionary."""
+        self.setStyleSheet(f"background: transparent; border: none;")
+        
+        # Style the Text Boxes
+        boxes = f"""
+            QTextEdit#ChatDisplay, QTextEdit#ChatInput {{
+                background-color: {T['BG_CARD']}; 
+                border: 1px solid {T['BORDER']};
                 border-radius: 8px;
-                padding: 5px;
+                color: {T['TEXT_MAIN']};
+                padding: 10px;
             }}
         """
-        self.chat_area.setStyleSheet(box_style)
-        self.input_line.setStyleSheet(box_style)
-        self.chat_area.viewport().setStyleSheet("background: transparent;")
-        self.input_line.viewport().setStyleSheet("background: transparent;")
+        self.chat_area.setStyleSheet(boxes)
+        self.input_line.setStyleSheet(boxes)
 
-        # 3. Status Labels
-        self.status_label.setStyleSheet(f"color: {accent}; background: transparent;")
+        self.status_label.setStyleSheet(f"color: {T['ACCENT']}; font-size: 10px; font-weight: bold;")
+        self.loading_label.setStyleSheet(f"color: {T['SUCCESS']}; font-size: 10px;")
 
-        # 4. The Buttons (The "Button Base" and "Accent" colors)
-        button_style = f"""
-            QPushButton {{
-                background-color: {btn_base};
-                color: {fg};
-                border: 2px solid {border};
-                padding: 8px;
-                border-radius: 5px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: {accent};
-                color: {bg}; 
-            }}
-            QPushButton:pressed {{
-                background-color: {fg};
-                color: {bg};
-            }}
+    def append_message(self, sender, text):
+        """Standardizes message spacing with clear gaps between turns."""
+        color = COLOR_ACCENT if sender != "You" else COLOR_FG
+        # Added an extra <br> for a clean double-space between chat turns
+        html = f"""
+        <br><br>
+        <span style='color:{color}; font-weight: bold;'>{sender.upper()}:</span>
+        <span style='color:{COLOR_FG};'> {text}</span>
         """
-        self.send_button.setStyleSheet(button_style)
-        self.protocol_button.setStyleSheet(button_style)
-        self.reason_button.setStyleSheet(button_style)
-        self.attach_btn.setStyleSheet(button_style)
+        self.chat_area.insertHtml(html)
+        self.chat_area.moveCursor(QTextCursor.End)
 
-    # --- DRAG & DROP & ATTACHMENT ---
-    def dragEnterEvent(self, event):
-        if event.mimeData().hasUrls():
-            event.accept()
-        else:
-            event.ignore()
-
-    def dropEvent(self, event):
-        files = [u.toLocalFile() for u in event.mimeData().urls()]
-        if files:
-            self.process_attachment(files[0])
-
-    def open_file_dialog(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Select Image", "", "Images (*.png *.jpg *.jpeg *.webp *.bmp)")
-        if path:
-            self.process_attachment(path)
-
-    def process_attachment(self, path):
-        importlib.reload(style_config)
-        ext = path.lower()
-        if ext.endswith(('.png', '.jpg', '.jpeg', '.webp', '.bmp')):
-            self.current_image_path = path
-            pixmap = QPixmap(path)
-            scaled = pixmap.scaledToHeight(90, Qt.SmoothTransformation)
-            self.image_preview.setPixmap(scaled)
-            self.image_preview.show()
-            self.attach_btn.setStyleSheet(f"background-color: {style_config.COLOR_ACCENT}; color: {style_config.COLOR_BG}; font-weight: bold; border-radius: 5px;")
-        else:
-            self.input_line.insertPlainText(path)
-
-    def clear_attachment(self):
-        self.current_image_path = None
-        self.image_preview.clear()
-        self.image_preview.hide()
-        self.apply_dynamic_theme() # Restore standard button style
-
-    # --- CORE HANDLERS ---
     def handle_prompt(self):
-        importlib.reload(style_config)
         prompt = self.input_line.toPlainText().strip()
         image_path = self.current_image_path
+        if not prompt and not image_path: return
         
-        if not prompt and not image_path: 
-            return
-
         self.append_message("You", prompt if prompt else "")
-        if image_path:
-            self.append_image_to_chat(image_path)
         
-        if image_path:
+        if image_path: 
+            self.append_image_to_chat(image_path)
             self.handle_reason(is_auto_call=True) 
         else:
-            self.chat_area.insertHtml(f"<br><b style='color:{style_config.COLOR_ACCENT};'>{self.model_config['name']}:</b> ")
-            self.thread = QThread()
-            self.worker = StreamWorker(
-                self.llm, 
-                prompt, 
-                self.max_tokens, 
-                self.temperature, 
-                None 
-            )
-            self.worker.moveToThread(self.thread)
-            self.worker.token_received.connect(self._append_streamed_token)
-            self.worker.finished.connect(self.thread.quit)
-            self.thread.started.connect(self.worker.run)
-            self.thread.start()
-
+            ai_name = self.model_config.get('name', 'JYNX').upper()
+            # Added double <br> here to separate from the User Prompt above
+            self.chat_area.insertHtml(f"<br><br><span style='color:{COLOR_ACCENT}; font-weight:bold;'>{ai_name}:</span> ")
+            
+            self._active_thread = QThread()
+            self._active_worker = StreamWorker(self.llm, prompt, self.max_tokens, self.temperature)
+            self._active_worker.moveToThread(self._active_thread)
+            
+            self._active_worker.token_received.connect(self._append_streamed_token)
+            self._active_worker.error.connect(lambda e: self.append_message("SYSTEM", f"ERROR: {e}"))
+            
+            self._active_worker.finished.connect(self._active_thread.quit)
+            self._active_worker.finished.connect(self._active_worker.deleteLater)
+            self._active_thread.finished.connect(self._active_thread.deleteLater)
+            
+            self._active_thread.started.connect(self._active_worker.run)
+            self._active_thread.start()
+            
         self.input_line.clear()
         self.clear_attachment()
 
-    def append_image_to_chat(self, path):
-        clean_path = path.replace("\\", "/")
-        if not clean_path.startswith("file:///"):
-            clean_path = f"file:///{clean_path}"
-        image_html = f'<div style="margin: 10px 0;"><img src="{clean_path}" width="300"></div>'
-        self.chat_area.append("") 
-        self.chat_area.insertHtml(image_html)
-        self.chat_area.moveCursor(QTextCursor.End)
-
-    def append_message(self, sender, text):
-        importlib.reload(style_config)
-        color = style_config.COLOR_ACCENT if sender != "You" else style_config.COLOR_FG
-        self.chat_area.append(f"<b style='color:{color};'>{sender}:</b> {text}")
-        self.chat_area.moveCursor(QTextCursor.End)
-
     def handle_reason(self, is_auto_call=False):
-        importlib.reload(style_config)
         prompt = self.input_line.toPlainText().strip()
         image_path = self.current_image_path
 
@@ -335,50 +260,65 @@ class ChatPage(QWidget):
             self.input_line.clear()
             self.clear_attachment()
 
-        self.append_message("Council", "Summoning experts...\n")
-        self.loading_label.setText("Reasoning...")
+        # Reset the summary tracker for the new council session
+        self._summary_started = False 
         
-        self.reasoning_worker = CouncilStreamWorker(prompt, image_path, username=self.username, fernet=self.fernet)
-        self.reasoning_thread = QThread()
-        self.reasoning_worker.moveToThread(self.reasoning_thread)
-        self.reasoning_worker.token_received.connect(self._handle_council_event)
-        self.reasoning_worker.finished.connect(self.reasoning_thread.quit)
-        self.reasoning_thread.started.connect(self.reasoning_worker.run)
-        self.reasoning_thread.start()
+        self.loading_label.setText("REASONING...")
+        
+        self._active_thread = QThread()
+        self._active_worker = CouncilStreamWorker(prompt, image_path, username=self.username, fernet=self.fernet)
+        self._active_worker.moveToThread(self._active_thread)
+        
+        self._active_worker.token_received.connect(self._handle_council_event)
+        self._active_worker.error.connect(lambda e: self.append_message("SYSTEM", f"ERROR: {e}"))
+        
+        self._active_worker.finished.connect(self._active_thread.quit)
+        self._active_worker.finished.connect(self._active_worker.deleteLater)
+        self._active_thread.finished.connect(self._active_thread.deleteLater)
+        
+        self._active_thread.started.connect(self._active_worker.run)
+        self._active_thread.start()
+
+    def _handle_council_event(self, event):
+        etype = event[0]
+        self.chat_area.moveCursor(QTextCursor.End)
+        
+        if etype == "summary":
+            if not getattr(self, "_summary_started", False):
+                # Using COLOR_PROTOCOL (Tactical Amber) for the Target header
+                self.chat_area.insertHtml(f"<br><br><b style='color:{COLOR_PROTOCOL};'>TARGET:</b> ")
+                self._summary_started = True
+            
+            raw_token = str(event[1])
+            clean_token = raw_token.replace("***SUMMARY***", "").replace("***EXPERTS***", "")
+            if clean_token:
+                self.chat_area.insertPlainText(clean_token)
+
+        elif etype == "expert_start":
+            self._summary_started = False 
+            expert_name = str(event[1]).upper()
+            # Use COLOR_FG (Off-White) to make Expert names pop against the Green/Dark BG
+            self.chat_area.insertHtml(f"<br><br><b style='color:{COLOR_FG};'>{expert_name}:</b> ")
+            
+        elif etype == "expert_token":
+            if len(event) >= 3:
+                self.chat_area.insertPlainText(event[2])
+
+        elif etype == "verdict_start":
+            self.chat_area.insertHtml(f"<br><br><b style='color:{COLOR_PROTOCOL};'>FINAL VERDICT:</b> ")
+
+        elif etype == "verdict_token":
+            self.chat_area.insertPlainText(event[1])
+
+        elif etype == "done":
+            self.loading_label.setText("")
+            self.chat_area.insertHtml("<br><br><small><i>[Council Concluded]</i></small><br>")
+            self.restore_default_model()
+            
+        self.chat_area.moveCursor(QTextCursor.End)
 
     def _append_streamed_token(self, token):
         self.chat_area.insertPlainText(token)
-        self.chat_area.moveCursor(QTextCursor.End)
-
-    def _handle_council_event(self, event):
-        importlib.reload(style_config)
-        etype = event[0]
-        
-        if etype == "summary":
-            if not hasattr(self, "_summary_started") or not self._summary_started:
-                self.chat_area.insertHtml(f"<br><br><b style='color:{style_config.COLOR_PROTOCOL};'>Target:</b> ")
-                self._summary_started = True
-            self.chat_area.insertPlainText(event[1])
-            
-        elif etype == "expert_start":
-            self._summary_started = False 
-            self.chat_area.insertHtml(f"<br><br><b style='color:{style_config.COLOR_ACCENT};'>{event[1]}:</b><br>")
-            
-        elif etype == "expert_token":
-            if len(event) >= 3: 
-                self.chat_area.insertPlainText(event[2])
-                
-        elif etype == "verdict_start":
-            self.chat_area.insertHtml(f"<br><br><b style='color:{style_config.COLOR_HIGHLIGHT};'>Final Verdict:</b><br>")
-            
-        elif etype == "verdict_token":
-            self.chat_area.insertPlainText(event[1])
-            
-        elif etype == "done":
-            self.chat_area.insertHtml(f"<br><br><small style='color:{style_config.COLOR_FG};'><i>[Council Concluded]</i></small><br>")
-            self.loading_label.setText("")
-            self.restore_default_model()
-            
         self.chat_area.moveCursor(QTextCursor.End)
 
     def deferred_load(self):
@@ -386,13 +326,10 @@ class ChatPage(QWidget):
             self.llm, _ = load_model_from_config("jynx_default")
             self.send_button.setEnabled(True)
             self.reason_button.setEnabled(True)
-            self.status_label.setText("● AI Engine Online")
-        except:
-            self.status_label.setText("○ Offline")
-
-    def restore_default_model(self):
-        self.llm, self.model_config = load_model_from_config("jynx_default")
-        gc.collect()
+            self.protocol_button.setEnabled(True)
+            self.status_label.setText("● AI ENGINE ONLINE")
+        except Exception as e:
+            self.status_label.setText(f"○ OFFLINE: {str(e)}")
 
     def eventFilter(self, obj, event):
         if obj == self.input_line and event.type() == QEvent.KeyPress:
@@ -404,81 +341,90 @@ class ChatPage(QWidget):
                 return True
         return super().eventFilter(obj, event)
 
-    # --- PROTOCOLS ---
-    def manual_protocol_trigger(self):
-        from Everything_else.jynx_operator_ui import soul_vent, soul_vent_summon
-        protocol, ok = QInputDialog.getText(self, "Run Protocol", "Enter protocol name:")
-        if not ok or not protocol: return
+    # --- Standard Support Methods ---
+    def process_attachment(self, path):
+        if path.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.bmp')):
+            self.current_image_path = path
+            pixmap = QPixmap(path).scaledToHeight(90, Qt.SmoothTransformation)
+            self.image_preview.setPixmap(pixmap)
+            self.image_preview.show()
+            self.attach_btn.setStyleSheet(f"background-color: {COLOR_ACCENT}; color: {COLOR_BG};")
+        else:
+            self.input_line.insertPlainText(path)
 
+    def clear_attachment(self):
+        self.current_image_path = None
+        self.image_preview.hide()
+        self.attach_btn.setStyleSheet(STYLE_BUTTON)
+
+    def open_file_dialog(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Select Image", "", "Images (*.png *.jpg *.jpeg)")
+        if path: self.process_attachment(path)
+
+    def restore_default_model(self):
+        self.llm, self.model_config = load_model_from_config("jynx_default")
+        self.max_tokens = self.model_config.get("max_tokens", 2048)
+        self.temperature = self.model_config.get("temperature", 0.7)
+        gc.collect()
+
+
+    def manual_protocol_trigger(self):
+        protocol, ok = QInputDialog.getText(self, "Protocol", "ID:")
+        if not ok or not protocol: return
+        
         if protocol == "soul_vent":
-            filename, ok1 = QInputDialog.getText(self, "Soul Vent", "Journal filename:")
+            fname, ok1 = QInputDialog.getText(self, "Soul Vent", "Journal ID:")
             if not ok1: return
-            chosen_prompt = get_random_prompt()
-            try:
-                entry, ok2 = self.get_multiline_input("Soul Vent", "Write your entry:", f"{chosen_prompt}\n\n")
-            except:
-                entry, ok2 = QInputDialog.getMultiLineText(self, "Soul Vent", "Write:", f"{chosen_prompt}\n\n")
-            
+            pmp = get_random_prompt()
+            entry, ok2 = self.get_multiline_input("Soul Vent", "INPUT:", f"{pmp}\n\n")
             if not ok2: return
-            passphrase, ok3 = QInputDialog.getText(self, "Soul Vent", "Passphrase:", QLineEdit.Password)
+            key, ok3 = QInputDialog.getText(self, "Soul Vent", "Key:", QLineEdit.Password)
             if ok3:
                 try:
-                    soul_vent(filename, entry, passphrase, chosen_prompt=chosen_prompt)
-                    self.append_message("🔐 Soul Vent", "Encrypted.")
-                except Exception as e: self.append_message("❌ Error", str(e))
-
+                    soul_vent(fname, entry, key, chosen_prompt=pmp)
+                    self.append_message("Soul Vent", "ENCRYPTED.")
+                except Exception as e: self.append_message("Error", str(e))
         elif protocol == "soul_vent_summon":
-            passphrase, ok1 = QInputDialog.getText(self, "Summon", "Passphrase:", QLineEdit.Password)
+            key, ok1 = QInputDialog.getText(self, "Summon", "Key:", QLineEdit.Password)
             if ok1:
                 try:
-                    filenames, decrypted_map = soul_vent_summon(passphrase)
-                    if not filenames:
-                        self.append_message("🧠 Soul Vent", decrypted_map)
-                        return
-                    selected, ok2 = QInputDialog.getItem(self, "Entry", "Choose:", filenames, 0, False)
-                    if ok2 and selected: self._show_readonly_dialog(selected, decrypted_map[selected])
-                except Exception as e: self.append_message("❌ Error", str(e))
+                    fnames, dmap = soul_vent_summon(key)
+                    if not fnames: return
+                    sel, ok2 = QInputDialog.getItem(self, "Entry", "SELECT ID:", fnames, 0, False)
+                    if ok2: self._show_readonly_dialog(sel, dmap[sel])
+                except Exception as e: self.append_message("Error", str(e))
         else:
             try:
-                result = execute_command(protocol, username=self.username)
-                self.append_message("⚙️ Protocol", result)
-            except Exception as e: self.append_message("❌ Error", str(e))
+                res = execute_command(protocol, username=self.username)
+                self.append_message("Protocol", res)
+            except Exception as e: self.append_message("Error", str(e))
 
     def _show_readonly_dialog(self, title, text):
-        importlib.reload(style_config)
-        dialog = QDialog(self)
-        dialog.setWindowTitle(f"📖 {title}")
-        layout = QVBoxLayout(dialog)
-        text_display = QTextEdit()
-        text_display.setPlainText(text)
-        text_display.setReadOnly(True)
-        text_display.setMinimumSize(600, 400)
-        text_display.setStyleSheet(f"background-color: {style_config.COLOR_BG}; color: {style_config.COLOR_FG}; border: 1px solid {style_config.COLOR_ACCENT};")
-        layout.addWidget(text_display)
-        close_btn = QPushButton("Close")
-        close_btn.setStyleSheet(style_config.STYLE_BUTTON)
-        close_btn.clicked.connect(dialog.accept)
-        layout.addWidget(close_btn)
-        dialog.exec()
-        
+        d = QDialog(self)
+        d.setWindowTitle(title)
+        l = QVBoxLayout(d)
+        te = QTextEdit()
+        te.setPlainText(text)
+        te.setReadOnly(True)
+        te.setStyleSheet(STYLE_INPUT)
+        l.addWidget(te)
+        b = QPushButton("CLOSE")
+        b.setStyleSheet(STYLE_BUTTON)
+        b.clicked.connect(d.accept)
+        l.addWidget(b)
+        d.exec()
+
     def get_multiline_input(self, title, label, initial_text=""):
-        importlib.reload(style_config)
-        dialog = QDialog(self)
-        dialog.setWindowTitle(title)
-        dialog.setMinimumWidth(500)
-        layout = QVBoxLayout(dialog)
-        lbl = QLabel(label)
-        lbl.setStyleSheet(style_config.STYLE_LABEL)
-        layout.addWidget(lbl)
-        text_edit = QTextEdit()
-        text_edit.setPlainText(initial_text)
-        text_edit.setLineWrapMode(QTextEdit.WidgetWidth)
-        text_edit.setStyleSheet(f"background-color: {style_config.COLOR_BUTTON}; color: {style_config.COLOR_FG};")
-        layout.addWidget(text_edit)
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(dialog.accept)
-        buttons.rejected.connect(dialog.reject)
-        layout.addWidget(buttons)
-        if dialog.exec() == QDialog.Accepted:
-            return text_edit.toPlainText(), True
+        d = QDialog(self)
+        d.setWindowTitle(title)
+        l = QVBoxLayout(d)
+        l.addWidget(QLabel(label))
+        te = QTextEdit()
+        te.setPlainText(initial_text)
+        te.setStyleSheet(STYLE_INPUT)
+        l.addWidget(te)
+        ok = QPushButton("OK")
+        ok.clicked.connect(d.accept)
+        l.addWidget(ok)
+        if d.exec() == QDialog.Accepted: return te.toPlainText(), True
         return "", False

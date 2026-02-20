@@ -1,298 +1,238 @@
-# ui/profile_page.py
-import json, os
+import json, os, time
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QLineEdit, QLabel, QPushButton, 
-    QFormLayout, QFrame, QSlider, QHBoxLayout, QScrollArea, QMessageBox
+    QFormLayout, QFrame, QHBoxLayout, QScrollArea, QMessageBox, QGridLayout
 )
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QFont
-
+from PySide6.QtCore import Qt, Signal, QTimer
 from .style_config import (
-    COLOR_BG, COLOR_FG, COLOR_ACCENT, COLOR_BUTTON, 
-    COLOR_PROTOCOL, COLOR_PAGE_BG, STYLE_BUTTON, FONT_SIZE, FONT_FAMILY
+    COLOR_FG, COLOR_ACCENT, STYLE_BUTTON, T
+)
+
+# --- PORTABLE PATH IMPORTS ---
+from core.paths import USER_DATA, PROJECTS_DIR, INVENTORY_DIR, CORE_DIR, MODELS_DIR
+
+# --- LOGIC IMPORTS ---
+from Everything_else.ghostvault import get_secrets
+from project_manager import list_project_files
+from Everything_else.inventory_manager import list_inventory_sheets
+from core.peers_manager import load_peers
+
+# System Protocols
+from core.system_protocols import (
+    get_disk_status, get_battery_status, get_primary_ip, get_system_uptime
 )
 
 class ProfilePage(QWidget):
-    theme_changed = Signal(dict)
+    profile_updated = Signal()
 
-    def __init__(self, username, fernet):
+    def __init__(self, username, fernet, passphrase=None): 
         super().__init__()
         self.username = username
         self.fernet = fernet
+        self.passphrase = passphrase
         
-        # --- USB-SAFE PATHING ---
-        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-        self.profile_dir = os.path.join(base_dir, "Everything_else", "vault")
-        if not os.path.exists(self.profile_dir):
-            self.profile_dir = os.path.join(base_dir, "core", "Everything_else", "vault")
-            
-        self.profile_path = os.path.join(self.profile_dir, f"{username}_profile.enc")
+        # Portable Pathing
+        self.profile_path = os.path.join(USER_DATA, f"{username}_profile.enc")
         
-        self.current_theme = {
-            "COLOR_BG": COLOR_BG, "COLOR_FG": COLOR_FG,
-            "COLOR_ACCENT": COLOR_ACCENT, "COLOR_BUTTON": COLOR_BUTTON,
-            "COLOR_PROTOCOL": COLOR_PROTOCOL, "COLOR_PAGE_BG": COLOR_PAGE_BG,
-            "COLOR_BORDER": "#e0e0e0" 
-        }
-
         self.setup_ui()
-        self.load_profile()
+        self.load_profile()  
+        self.refresh_stats() 
+        
+        self.refresh_timer = QTimer(self)
+        self.refresh_timer.timeout.connect(self.refresh_live_metrics)
+        self.refresh_timer.start(3000)
 
     def setup_ui(self):
-        # Main container with breathing room
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(30, 20, 30, 20)
-        main_layout.setSpacing(15)
+        main_layout.setSpacing(20)
 
-        # 1. Header Section (Matching Project Manager Style)
-        header_layout = QVBoxLayout()
-        self.title_label = QLabel("NEURAL MAPPING & INTERFACE")
-        self.title_label.setAlignment(Qt.AlignCenter)
-        self.title_label.setStyleSheet(f"""
-            color: {COLOR_FG}; 
-            font-size: {FONT_SIZE + 10}px; 
-            font-weight: 800; 
-            letter-spacing: 1px;
-            margin-bottom: 5px;
-        """)
-        header_layout.addWidget(self.title_label)
+        # 1. Header
+        header_row = QHBoxLayout()
+        self.title_label = QLabel("NEURAL INTERFACE: OPERATOR OVERVIEW")
+        self.title_label.setStyleSheet(f"color: {COLOR_FG}; font-size: 18px; font-weight: 800; letter-spacing: 2px;")
         
-        # The Divider Line
-        line = QFrame()
-        line.setFrameShape(QFrame.HLine)
-        line.setStyleSheet(f"background-color: {COLOR_ACCENT}; min-height: 2px; max-height: 2px;")
-        header_layout.addWidget(line)
+        self.uptime_label = QLabel("UPTIME: --")
+        self.uptime_label.setStyleSheet(f"color: {COLOR_ACCENT}; font-family: 'Consolas'; font-size: 11px;")
         
-        main_layout.addLayout(header_layout)
+        header_row.addWidget(self.title_label)
+        header_row.addStretch()
+        header_row.addWidget(self.uptime_label)
+        main_layout.addLayout(header_row)
 
-        # 2. Scroll Area for content
+        # 2. Scroll Area
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setStyleSheet("background: transparent;")
         
         content_widget = QWidget()
-        content_widget.setStyleSheet("background: transparent;")
-        self.layout = QVBoxLayout(content_widget)
-        self.layout.setContentsMargins(10, 10, 10, 10)
-        self.layout.setSpacing(25)
+        self.content_vbox = QVBoxLayout(content_widget)
+        self.content_vbox.setSpacing(25)
 
-        # --- SECTION HELPER ---
-        def create_card(title):
-            card = QFrame()
-            card.setStyleSheet(f"""
-                QFrame {{
-                    background-color: white;
-                    border-radius: 15px;
-                    border: 1px solid #e0e0e0;
-                }}
-                QLabel {{ border: none; font-weight: bold; color: #444; }}
-            """)
-            card_layout = QVBoxLayout(card)
-            card_layout.setContentsMargins(20, 20, 20, 20)
-            
-            header = QLabel(title)
-            header.setStyleSheet(f"color: {COLOR_ACCENT}; font-size: 14px; text-transform: uppercase;")
-            card_layout.addWidget(header)
-            card_layout.addSpacing(10)
-            return card, card_layout
-
-        # --- OPERATOR HEURISTICS CARD ---
-        heur_card, heur_layout = create_card("Operator Personal Heuristics")
+        # --- SECTION A: SYSTEM HUD ---
+        self.hud_card = QFrame()
+        self.hud_card.setStyleSheet("background-color: #141d26; border: 1px solid #2c3e50; border-radius: 10px;")
+        hud_layout = QGridLayout(self.hud_card)
+        hud_layout.setContentsMargins(20, 20, 20, 20)
+        hud_layout.setHorizontalSpacing(40)
+        hud_layout.setVerticalSpacing(15)
         
-        # 1. ADD THE AI COUNCIL NOTE HERE
-        council_note = QLabel("The AI Council specifically requested we ask you these questions.")
-        council_note.setStyleSheet(f"color: {COLOR_ACCENT}; font-style: italic; font-size: 11px; margin-bottom: 5px;")
-        heur_layout.addWidget(council_note)
+        self.stat_labels = {}
+        metrics = [
+            ("Vault Files", "vault_count", 0, 0),
+            ("AI Models", "pass_count", 0, 1),
+            ("Active Missions", "proj_count", 0, 2),
+            ("Intel Sheets", "inv_count", 0, 3),
+            ("Trusted Network", "net_count", 1, 0),
+            ("Computer Storage", "disk", 1, 1),
+            ("Computer Battery", "batt", 1, 2),
+            ("Local IP", "ip", 1, 3)
+        ]
+
+        for name, key, r, c in metrics:
+            vbox = QVBoxLayout()
+            vbox.setSpacing(2)
+            t_lbl = QLabel(name.upper())
+            t_lbl.setStyleSheet("color: #7f8c8d; font-size: 9px; border: none; font-weight: bold;")
+            v_lbl = QLabel("0")
+            v_lbl.setStyleSheet(f"color: {COLOR_ACCENT}; font-size: 14px; font-weight: bold; font-family: 'Consolas'; border: none;")
+            vbox.addWidget(t_lbl)
+            vbox.addWidget(v_lbl)
+            self.stat_labels[key] = v_lbl
+            hud_layout.addLayout(vbox, r, c)
+
+        self.content_vbox.addWidget(self.hud_card)
+
+        # --- SECTION B: OPERATOR HEURISTICS ---
+        self.master_card = QFrame()
+        self.master_card.setStyleSheet("background-color: #1c2833; border-radius: 12px; border: 1px solid #34495e;")
+        card_layout = QVBoxLayout(self.master_card)
+        card_layout.setContentsMargins(25, 25, 25, 25)
+
+        ident_label = QLabel("OPERATOR PERSONALITY & COGNITIVE MAPPING")
+        ident_label.setStyleSheet(f"color: {COLOR_ACCENT}; font-size: 11px; font-weight: bold; letter-spacing: 1px; border: none;")
+        card_layout.addWidget(ident_label)
+        card_layout.addSpacing(10)
 
         h_form = QFormLayout()
-        h_form.setSpacing(15) # Increased spacing for better readability
-        h_form.setLabelAlignment(Qt.AlignLeft)
-
-        # Define the input style (Keeping your original look)
-        input_style = f"""
-            QLineEdit {{
-                border: 1px solid #ccc;
-                border-radius: 8px;
-                padding: 10px;
-                background: #fcfcfc;
-                font-family: '{FONT_FAMILY}';
-                font-size: 13px;
-            }}
-            QLineEdit:focus {{ border: 2px solid {COLOR_ACCENT}; background: white; }}
-        """
-
-        # 2. CREATE THE INPUTS INDIVIDUALLY FOR CUSTOMIZATION
-        self.h_inputs = {
-            "callsign": QLineEdit(),
-            "region": QLineEdit(),
-            "goal": QLineEdit(),
-            "fear": QLineEdit(),
-            "logic": QLineEdit()
-        }
-
-        # Apply style and set placeholders (The "Examples")
-        self.h_inputs["callsign"].setPlaceholderText("e.g., Ghost_Zero, Neon_Specter")
-        self.h_inputs["region"].setPlaceholderText("e.g., Sector 7G, North America")
-        self.h_inputs["goal"].setPlaceholderText("e.g., To build a sustainable tech-farm and achieve autonomy.")
-        self.h_inputs["fear"].setPlaceholderText("e.g., Total data corruption or loss of family.")
-        self.h_inputs["logic"].setPlaceholderText("e.g., Intuitive / Big-picture")
-
-        # 3. ADD TO FORM WITH THE NEW QUESTIONS
-        h_form.addRow(QLabel("What is your Operator Callsign?"), self.h_inputs["callsign"])
-        h_form.addRow(QLabel("Where are you currently located?"), self.h_inputs["region"])
-        h_form.addRow(QLabel("What are your primary life goals?"), self.h_inputs["goal"])
-        h_form.addRow(QLabel("What is your greatest fear?"), self.h_inputs["fear"])
-        h_form.addRow(QLabel("How do you like to receive information?"), self.h_inputs["logic"])
-
-        # Apply the style to all of them
-        for widget in self.h_inputs.values():
-            widget.setStyleSheet(input_style)
-
-        heur_layout.addLayout(h_form)
-        self.layout.addWidget(heur_card)
-
-        # --- VISUAL TONE CARD ---
-        tone_card, tone_layout = create_card("System Visual Tone")
+        input_style = "border: 1px solid #34495e; border-radius: 6px; padding: 10px; background: #2c3e50; color: white; font-size: 13px;"
         
-        # Sliders Container
-        slider_box = QVBoxLayout()
-        slider_box.setSpacing(15)
-
-        self.sat_slider = QSlider(Qt.Horizontal)
-        self.val_slider = QSlider(Qt.Horizontal)
-        for s in [self.sat_slider, self.val_slider]:
-            s.setRange(0, 255)
-            s.setValue(127)
-            s.setFixedHeight(20)
-
-        slider_box.addWidget(QLabel("Saturation (Color Intensity)"))
-        slider_box.addWidget(self.sat_slider)
-        slider_box.addWidget(QLabel("Brightness (Luminance)"))
-        slider_box.addWidget(self.val_slider)
+        self.h_inputs = {}
+        questions = [
+            ("callsign", "Callsign"), 
+            ("region", "Current Region"),
+            ("goal", "Primary Objective"), 
+            ("fear", "Critical Fear"),
+            ("logic", "Data Processing Style")
+        ]
         
-        tone_layout.addLayout(slider_box)
-        self.layout.addWidget(tone_card)
-
-        # --- COLOR SPECTRUM CARD ---
-        spec_card, spec_layout = create_card("Accent Color Palette")
+        for key, label_text in questions:
+            self.h_inputs[key] = QLineEdit()
+            w = self.h_inputs[key]
+            w.setPlaceholderText(f"Establish {label_text.lower()}...")
+            w.setStyleSheet(input_style)
+            label = QLabel(label_text.upper())
+            label.setStyleSheet("color: #7f8c8d; font-size: 10px; border: none;")
+            h_form.addRow(label, w)
         
-        hue_style = """
-            QSlider::groove:horizontal {
-                height: 12px; background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
-                stop:0 red, stop:0.16 orange, stop:0.33 yellow, 
-                stop:0.5 green, stop:0.66 blue, stop:0.83 indigo, stop:1 violet);
-                border-radius: 6px;
-            }
-            QSlider::handle:horizontal {
-                background: white; border: 1px solid #888; width: 20px; height: 20px; 
-                margin: -5px 0; border-radius: 10px;
-            }
-        """
-
-        self.sliders = {}
-        for label_text, key in [("Accent Focus", "COLOR_ACCENT"), ("Interaction Surface", "COLOR_BUTTON")]:
-            spec_layout.addWidget(QLabel(label_text))
-            s = QSlider(Qt.Horizontal)
-            s.setRange(0, 359)
-            s.setStyleSheet(hue_style)
-            s.valueChanged.connect(self.sync_theme)
-            spec_layout.addWidget(s)
-            self.sliders[key] = s
-
-        self.layout.addWidget(spec_card)
-        self.layout.addStretch()
-
-        # --- FOOTER BUTTONS ---
-        btn_layout = QHBoxLayout()
-        btn_layout.setContentsMargins(0, 20, 0, 0)
-        
-        self.reset_btn = QPushButton("Reset Defaults")
-        self.reset_btn.setStyleSheet("color: #777; border: none; font-weight: bold;")
-        self.reset_btn.clicked.connect(self.reset_to_defaults)
-        
-        self.save_btn = QPushButton("Commit Changes")
-        self.save_btn.setFixedSize(220, 45)
-        self.save_btn.setStyleSheet(STYLE_BUTTON + "font-size: 14px; border-radius: 12px;")
-        self.save_btn.clicked.connect(self.save_profile)
-        
-        btn_layout.addWidget(self.reset_btn)
-        btn_layout.addStretch()
-        btn_layout.addWidget(self.save_btn)
-        
-        main_layout.addWidget(scroll)
-        main_layout.addLayout(btn_layout)
+        card_layout.addLayout(h_form)
+        self.content_vbox.addWidget(self.master_card)
 
         scroll.setWidget(content_widget)
-        self.sat_slider.valueChanged.connect(self.sync_theme)
-        self.val_slider.valueChanged.connect(self.sync_theme)
+        main_layout.addWidget(scroll)
 
-    # ... [Keep sync_theme, save_profile, load_profile as they are] ...
-
-    def sync_theme(self):
-        s_val = self.sat_slider.value()
-        v_val = self.val_slider.value()
-        for key, slider in self.sliders.items():
-            color = QColor.fromHsv(slider.value(), s_val, v_val)
-            self.current_theme[key] = color.name()
+        footer = QHBoxLayout()
+        self.save_btn = QPushButton("INITIALIZE COMMIT")
+        self.save_btn.setFixedSize(220, 45)
+        self.save_btn.setStyleSheet(STYLE_BUTTON + "font-size: 12px; font-weight: bold;")
+        self.save_btn.clicked.connect(self.save_profile)
         
-        b_val = 200 if v_val < 128 else 60
-        self.current_theme["COLOR_BORDER"] = QColor(b_val, b_val, b_val).name()
-        self.theme_changed.emit(self.current_theme)
+        footer.addStretch()
+        footer.addWidget(self.save_btn)
+        main_layout.addLayout(footer)
+
+    def refresh_live_metrics(self):
+        try:
+            # System Protocols
+            disk = get_disk_status()
+            if "disk" in self.stat_labels:
+                self.stat_labels["disk"].setText(f"{disk.get('percent_used', 0)}% USED")
+            
+            batt_info = get_battery_status()
+            batt_val = batt_info.split("(")[0].strip() if batt_info else "N/A"
+            if "batt" in self.stat_labels:
+                self.stat_labels["batt"].setText(batt_val)
+            
+            if "ip" in self.stat_labels:
+                self.stat_labels["ip"].setText(get_primary_ip())
+                
+            self.uptime_label.setText(f"UPTIME: {get_system_uptime().upper()}")
+        except Exception as e: 
+            # This will now print the SPECIFIC reason it's failing if it happens again
+            print(f"HUD Live Refresh Error: {e}")
+
+    def refresh_stats(self):
+        try:
+            # 1. Vault Files (STRICTLY .DAT - UNTOUCHED)
+            if os.path.exists(USER_DATA):
+                v_files = [f for f in os.listdir(USER_DATA) 
+                          if f.endswith('.dat') and os.path.isfile(os.path.join(USER_DATA, f))]
+                self.stat_labels["vault_count"].setText(str(len(v_files)))
+            
+            # 2. AI Models (.gguf count - WITH GHOST FILE FILTER)
+            if not os.path.exists(MODELS_DIR):
+                os.makedirs(MODELS_DIR, exist_ok=True)
+            
+            # FILTER: Must end in .gguf AND not start with '.' AND must be over 1MB
+            m_files = []
+            for f in os.listdir(MODELS_DIR):
+                f_path = os.path.join(MODELS_DIR, f)
+                if f.lower().endswith('.gguf') and not f.startswith('.') and os.path.isfile(f_path):
+                    # Final safety check: skip files that are effectively empty (under 1KB)
+                    if os.path.getsize(f_path) > 1024: 
+                        m_files.append(f)
+            
+            self.stat_labels["pass_count"].setText(str(len(m_files)))
+
+            # 3. Projects
+            proj_list = list_project_files(self.username)
+            self.stat_labels["proj_count"].setText(str(len(proj_list)))
+
+            # 4. Inventory
+            sheets = list_inventory_sheets(self.username)
+            self.stat_labels["inv_count"].setText(str(len(sheets)))
+
+            # 5. Nodes
+            peers = load_peers(self.username, self.fernet)
+            self.stat_labels["net_count"].setText(str(len(peers)))
+
+        except Exception as e:
+            print(f"DEBUG Stats Error: {e}")
 
     def save_profile(self):
-        data = {
-            "heuristics": {k: w.text() for k, w in self.h_inputs.items()},
-            "theme": self.current_theme,
-            "slider_positions": {k: s.value() for k, s in self.sliders.items()},
-            "sat": self.sat_slider.value(),
-            "val": self.val_slider.value()
-        }
+        data = {"heuristics": {k: w.text() for k, w in self.h_inputs.items()}}
         try:
-            os.makedirs(self.profile_dir, exist_ok=True)
-            encrypted = self.fernet.encrypt(json.dumps(data).encode())
+            raw_json = json.dumps(data).encode()
+            encrypted = self.fernet.encrypt(raw_json)
             with open(self.profile_path, "wb") as f:
                 f.write(encrypted)
-            self.save_btn.setText("Profile Committed")
+            
+            self.save_btn.setText("SYNC COMPLETE")
+            self.refresh_stats()
+            self.profile_updated.emit()
+            QTimer.singleShot(2000, lambda: self.save_btn.setText("INITIALIZE COMMIT"))
         except Exception as e:
-            QMessageBox.critical(self, "Profile Error", f"Encryption failed: {e}")
+            QMessageBox.critical(self, "Error", f"Link Failed: {e}")
 
     def load_profile(self):
-        if not os.path.exists(self.profile_path):
-            self.reset_to_defaults()
-            return
+        if not os.path.exists(self.profile_path): return
         try:
             with open(self.profile_path, "rb") as f:
                 decrypted = self.fernet.decrypt(f.read())
                 data = json.loads(decrypted)
-                
-                heuristics = data.get("heuristics", {})
-                for key, widget in self.h_inputs.items():
-                    widget.setText(heuristics.get(key, ""))
-
-                self.sat_slider.blockSignals(True)
-                self.val_slider.blockSignals(True)
-                self.sat_slider.setValue(data.get("sat", 127))
-                self.val_slider.setValue(data.get("val", 127))
-                
-                positions = data.get("slider_positions", {})
-                for key, val in positions.items():
-                    if key in self.sliders:
-                        self.sliders[key].blockSignals(True)
-                        self.sliders[key].setValue(val)
-                        self.sliders[key].blockSignals(False)
-                
-                self.sat_slider.blockSignals(False)
-                self.val_slider.blockSignals(False)
-                self.sync_theme()
-        except Exception:
-            self.reset_to_defaults()
-
-    def reset_to_defaults(self):
-        for widget in self.h_inputs.values():
-            widget.clear()
-        self.sat_slider.setValue(127)
-        self.val_slider.setValue(200)
-        if "COLOR_ACCENT" in self.sliders: self.sliders["COLOR_ACCENT"].setValue(200)
-        if "COLOR_BUTTON" in self.sliders: self.sliders["COLOR_BUTTON"].setValue(200)
-        self.sync_theme()
+                heur = data.get("heuristics", {})
+                for k, w in self.h_inputs.items():
+                    w.setText(heur.get(k, ""))
+        except Exception as e:
+            print(f"DEBUG Load Error: {e}")

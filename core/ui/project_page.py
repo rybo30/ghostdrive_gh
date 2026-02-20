@@ -3,14 +3,12 @@ from PySide6.QtWidgets import (
     QListWidgetItem, QHBoxLayout, QProgressBar, QLineEdit, QFrame,
     QDialog, QDialogButtonBox, QFormLayout
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSize
 from project_manager import list_project_files, load_project_file, save_project_file, delete_project_file
 from core.paths import PROJECTS_DIR, EVERYTHING_ELSE
 import os
 from .style_config import (
-    FONT_FAMILY, FONT_SIZE,
-    COLOR_BG, COLOR_FG, COLOR_BORDER, COLOR_ACCENT, COLOR_BUTTON, COLOR_HIGHLIGHT,
-    STYLE_LABEL, STYLE_BUTTON, COLOR_PAGE_BG
+    T, FONT_MAIN, FONT_SIZE, STYLE_BUTTON, STYLE_INPUT
 )
 
 class ProjectsPage(QWidget):
@@ -23,32 +21,28 @@ class ProjectsPage(QWidget):
 
         # --- Main Layout ---
         self.main_layout = QVBoxLayout(self)
-        self.main_layout.setContentsMargins(20, 20, 20, 20)
+        self.main_layout.setContentsMargins(30, 30, 30, 30)
         self.main_layout.setSpacing(15)
 
         # Header Section
-        header_layout = QVBoxLayout()
-        self.title_label = QLabel("PROJECT MANAGER")
-        self.title_label.setStyleSheet(f"color: {COLOR_FG}; font-size: {FONT_SIZE + 10}px; font-weight: bold; letter-spacing: 1px;")
-        self.title_label.setAlignment(Qt.AlignCenter)
-        header_layout.addWidget(self.title_label)
-        
-        # 1. Create a fresh layout just for the Header & Line
         header_container = QVBoxLayout()
-
-        self.title_label = QLabel("PROJECT MANAGER")
+        self.title_label = QLabel("MISSION CONTROL")
         self.title_label.setAlignment(Qt.AlignCenter)
-        self.title_label.setStyleSheet(f"color: {COLOR_FG}; font-size: {FONT_SIZE + 10}px; font-weight: bold; letter-spacing: 1px; margin-bottom: 5px;")
+        self.title_label.setStyleSheet(f"""
+            color: {T['ACCENT_SOLID']}; 
+            font-family: '{FONT_MAIN}'; 
+            font-size: 22px; 
+            font-weight: 800; 
+            letter-spacing: 1.5px; 
+            margin-bottom: 5px;
+        """)
         header_container.addWidget(self.title_label)
 
         # The Thick Divider Line
         line = QFrame()
         line.setFrameShape(QFrame.HLine)
-        line.setStyleSheet(f"background-color: {COLOR_ACCENT}; min-height: 2px; max-height: 2px;")
+        line.setStyleSheet(f"background-color: {T['ACCENT_SOLID']}; min-height: 2px; max-height: 2px;")
         header_container.addWidget(line)
-
-        # ADD TO MAIN LAYOUT: Use 'main_layout' or 'self.main_layout' 
-        # (Whichever one you defined at the top of your setup_ui function)
         self.main_layout.addLayout(header_container)
 
         # --- Two-Pane Body ---
@@ -56,8 +50,8 @@ class ProjectsPage(QWidget):
         
         # LEFT: Project Selection
         left_panel = QVBoxLayout()
-        left_label = QLabel("ACTIVE PROTOCOLS")
-        left_label.setStyleSheet(f"color: {COLOR_ACCENT}; font-weight: bold; font-size: 10px;")
+        left_label = QLabel("ACTIVE PLANS")
+        left_label.setStyleSheet(f"color: {T['ACCENT_SOLID']}; font-family: '{FONT_MAIN}'; font-weight: bold; font-size: 10px; letter-spacing: 1px;")
         left_panel.addWidget(left_label)
         
         self.project_list = QListWidget()
@@ -66,7 +60,6 @@ class ProjectsPage(QWidget):
         self.project_list.itemClicked.connect(self.display_project)
         left_panel.addWidget(self.project_list)
         
-        # Project Controls
         self.add_project_btn = QPushButton("+ New Project")
         self.add_project_btn.setStyleSheet(STYLE_BUTTON)
         self.add_project_btn.clicked.connect(self.add_project)
@@ -77,23 +70,19 @@ class ProjectsPage(QWidget):
         # RIGHT: Task Workspace
         right_panel = QVBoxLayout()
         
-        # --- Progress Bar (Neural style) ---
+        # --- Progress Bar ---
         progress_container = QVBoxLayout()
-        
-        # 1. Create the label first
         self.progress_label = QLabel("INITIALIZING SYSTEM...") 
-        self.progress_label.setStyleSheet(f"font-size: 10px; color: {COLOR_FG};")
+        self.progress_label.setStyleSheet(f"font-family: '{FONT_MAIN}'; font-size: 10px; color: {T['TEXT_MAIN']};")
         
-        # 2. Create the progress bar second
         self.progress = QProgressBar()
         self.progress.setFixedHeight(6)
         self.progress.setTextVisible(False)
         self.progress.setStyleSheet(f"""
-            QProgressBar {{ border: none; background-color: {COLOR_BUTTON}; border-radius: 3px; }}
-            QProgressBar::chunk {{ background-color: {COLOR_ACCENT}; border-radius: 3px; }}
+            QProgressBar {{ border: none; background-color: {T['BORDER']}; border-radius: 3px; }}
+            QProgressBar::chunk {{ background-color: {T['ACCENT_SOLID']}; border-radius: 3px; }}
         """)
         
-        # 3. Add them to the layout
         progress_container.addWidget(self.progress_label)
         progress_container.addWidget(self.progress)
         right_panel.addLayout(progress_container)
@@ -107,49 +96,42 @@ class ProjectsPage(QWidget):
         # Workspace Controls
         self.quick_add_input = QLineEdit()
         self.quick_add_input.setPlaceholderText("Quick add task to current project...")
-        self.quick_add_input.setStyleSheet(f"""
-            QLineEdit {{
-                background-color: {COLOR_BUTTON}; 
-                border: 1px solid {COLOR_ACCENT}; 
-                border-radius: 4px;
-                padding: 10px; 
-                color: {COLOR_FG};
-            }}
-        """)
+        self.quick_add_input.setStyleSheet(STYLE_INPUT)
         self.quick_add_input.returnPressed.connect(self.handle_quick_add)
         right_panel.addWidget(self.quick_add_input)
 
+
+        # --- UPDATED COMPACT BUTTONS ---
         task_btn_layout = QHBoxLayout()
         buttons = [
-            ("Mark Done", self.mark_task_complete),
+            ("Done ✅", self.mark_task_complete),
             ("Add Task", self.add_task),
             ("Edit Task", self.edit_task),
-            ("Delete Task", self.delete_task),
-            ("Edit Project Info", self.edit_project_details),
-            ("Delete Project", self.delete_project)
+            ("Kill Task", self.delete_task),      # Shortened "Kill Task"
+            ("Edit Proj.", self.edit_project_details),
+            ("Delete", self.delete_project)   # Shortened "Delete"
         ]
         
         for text, func in buttons:
             btn = QPushButton(text)
-            if text == "Delete Project":
-                # This sets the background to red, text to white, and removes the native border
+            
+            # Use 'in' to check for keywords so colors don't break if you change emojis
+            if "Delete" in text or "Purge" in text:
                 btn.setStyleSheet(f"""
                     QPushButton {{
                         background-color: #d9534f; 
                         color: white; 
-                        border-radius: 4px;
+                        border-radius: 8px; 
                         padding: 8px;
-                        font-weight: bold;
+                        font-family: '{FONT_MAIN}'; 
+                        font-weight: 900;
+                        font-size: 11px;
                     }}
-                    QPushButton:hover {{
-                        background-color: #c9302c;
-                    }}
-                    QPushButton:pressed {{
-                        background-color: #ac2925;
-                    }}
+                    QPushButton:hover {{ background-color: #c9302c; }}
                 """) 
             else:
-                btn.setStyleSheet(STYLE_BUTTON)
+                # Apply standard style but slightly smaller font for the compact fit
+                btn.setStyleSheet(STYLE_BUTTON + f"; font-size: 11px; font-weight: 800; padding: 8px;")
             
             btn.clicked.connect(func)
             task_btn_layout.addWidget(btn)
@@ -159,28 +141,6 @@ class ProjectsPage(QWidget):
         
         self.main_layout.addLayout(self.body_layout)
         self.load_projects()
-
-    def get_list_style(self):
-        return f"""
-            QListWidget {{
-                background-color: {COLOR_PAGE_BG};
-                border: 1px solid {COLOR_BORDER};
-                border-radius: 8px;
-                padding: 5px;
-                outline: none;
-            }}
-            QListWidget::item {{
-                padding: 10px;
-                border-bottom: 1px solid {COLOR_BUTTON};
-                color: {COLOR_FG};
-            }}
-            QListWidget::item:selected {{
-                background-color: {COLOR_HIGHLIGHT};
-                color: {COLOR_FG};
-                border-radius: 5px;
-                border-left: 4px solid {COLOR_ACCENT};
-            }}
-        """
 
     def parse_suggestions(self, text):
         goals = []
@@ -338,6 +298,32 @@ class ProjectsPage(QWidget):
                         break
 
 
+    def get_list_style(self):
+        return f"""
+            QListWidget {{
+                background-color: {T['BG_CARD']};
+                border: 1px solid {T['BORDER']};
+                border-radius: 12px;
+                outline: none;
+                padding: 10px;
+            }}
+            QListWidget::item {{
+                background: transparent;
+                border: none;
+                margin-bottom: 4px;
+                border-radius: 8px;
+            }}
+            QListWidget::item:hover {{
+                background-color: {T['BG_HOVER']};
+            }}
+            QListWidget::item:selected {{
+                background-color: {T['ACCENT_GLOW']};
+                border-left: 4px solid {T['ACCENT_SOLID']};
+                color: white;
+            }}
+        """
+
+
     def add_task_to_project(self, goal_title, task):
         if not hasattr(self, "current_project_data"):
             return
@@ -439,61 +425,86 @@ class ProjectsPage(QWidget):
             self.quick_add_input.setFocus()
 
     def display_project(self, item):
-        """Refines the visual layout, now without the Chaos Queue."""
         if item is None: return
-            
         search_text = item.text().lower()
         self.current_project_file = next((f for f in self.project_files if f[:-4].lower() == search_text), None)
-        
         if not self.current_project_file: return
 
         active_key = self.get_active_fernet(self.current_project_file)
         data = load_project_file(self.username, self.current_project_file, active_key)
-        
-        if not data:
-            QMessageBox.critical(self, "Error", "Could not decrypt or load project data.")
-            return
+        if not data: return
 
         self.current_project_data = data
         self.project_detail_list.clear()
 
-        # --- PROGRESS CALCULATION ---
+        # Update Progress
         all_tasks = data.get("tasks", [])
-        active_goals = data.get("goals", [])
-        
-        # Only count tasks that belong to one of the current goals
-        valid_tasks = [t for t in all_tasks if t.get("goal") in active_goals]
-        
-        total = len(valid_tasks)
-        completed = len([t for t in valid_tasks if t.get("status") == "complete"])
-        
-        calc_percentage = int((completed / total) * 100) if total else 0
+        total = len(all_tasks)
+        completed = len([t for t in all_tasks if t.get("status") == "complete"])
+        calc_percentage = int((completed / total) * 100) if total > 0 else 0
         self.progress.setValue(calc_percentage)
-        self.progress_label.setText(f"PROJECT COMPLETION: {calc_percentage}%")
+        self.progress_label.setText(f"COMPLETION: {calc_percentage}%")
 
-        # Workspace Headers
-        self.project_detail_list.addItem(f"FILE: {self.current_project_file}")
-        self.project_detail_list.addItem(f"DESC: {data.get('description', 'No description')}")
-        self.project_detail_list.addItem(f"DEADLINE: {data.get('deadline', 'N/A')}")
-        self.project_detail_list.addItem("-" * 30)
-
-        # Sort and Add Tasks grouped by Goals
-        for goal in data.get("goals", []):
-            goal_item = QListWidgetItem(f"🎯 {goal.upper()}")
-            # We keep headers selectable now so the user can click them to "target" the Quick Add
-            self.project_detail_list.addItem(goal_item)
+        def add_styled_item(html_text, raw_text=None, is_header=False, indent=False):
+            list_item = QListWidgetItem()
+            if raw_text:
+                list_item.setData(Qt.UserRole, raw_text)
             
-            for t in all_tasks: # Use 'all_tasks' which you defined at the top of the function
+            container = QWidget()
+            # Background transparent so the QListWidget selection highlight shows through
+            container.setStyleSheet("background: transparent; border: none;")
+            layout = QVBoxLayout(container)
+            
+            label = QLabel(html_text)
+            label.setWordWrap(True)
+            
+            # Set width slightly narrower than the list to prevent horizontal scroll popping
+            label.setFixedWidth(self.project_detail_list.width() - 80)
+            label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            
+            style = f"color: {T['TEXT_MAIN']}; font-size: {'13px' if is_header else '12px'}; font-family: '{FONT_MAIN}';"
+            if is_header: style += "font-weight: bold;"
+            label.setStyleSheet(style)
+            
+            # Increased vertical padding (15px) for much better breathing room
+            left_m = 55 if indent else 25
+            layout.setContentsMargins(left_m, 15, 25, 15) 
+            layout.setSpacing(0)
+            layout.addWidget(label)
+            
+            self.project_detail_list.addItem(list_item)
+            self.project_detail_list.setItemWidget(list_item, container)
+            
+            # Recalculate size with a 10px height buffer to prevent cutoffs
+            container.adjustSize()
+            list_item.setSizeHint(container.sizeHint() + QSize(0, 10))
+
+        # 1. Metadata
+        add_styled_item(f"<b style='color:{T['ACCENT_SOLID']}'>FILE:</b> {self.current_project_file}")
+        add_styled_item(f"<b style='color:{T['ACCENT_SOLID']}'>DESC:</b> {data.get('description', '...')}")
+        deadline = data.get('deadline', 'NOT SET')
+        add_styled_item(f"<b style='color:{T['ACCENT_SOLID']}'>DEADLINE:</b> <span style='color: #FF5555;'>{deadline}</span>")
+        
+        # 2. Tasks logic
+        assigned_tasks = []
+        for goal in data.get("goals", []):
+            # Goal Header
+            add_styled_item(f"<span style='color: #FFCC00;'>🎯 {goal.upper()}</span>", is_header=True)
+            for t in all_tasks:
                 if t.get("goal") == goal:
                     status_icon = "✅" if t["status"] == "complete" else "⬜"
-                    self.project_detail_list.addItem(f"  ⤷ {status_icon} {t['task']}")
+                    html = f"<span style='color:#666;'>⤷</span> {status_icon} {t['task']}"
+                    add_styled_item(html, raw_text=t['task'], indent=True)
+                    assigned_tasks.append(t)
 
-        
-        # --- DYNAMIC PROGRESS UPDATE ---
-        # Now that we have real data (completed/total), we update the UI
-        calc_percentage = int((completed / total) * 100) if total else 0
-        self.progress.setValue(calc_percentage)
-        self.progress_label.setText(f"PROJECT COMPLETION: {calc_percentage}%")
+        # 3. Uncategorized
+        uncategorized = [t for t in all_tasks if t not in assigned_tasks]
+        if uncategorized:
+            add_styled_item("<span style='color: #AA88FF;'>📦 UNCATEGORIZED</span>", is_header=True)
+            for t in uncategorized:
+                status_icon = "✅" if t["status"] == "complete" else "⬜"
+                html = f"<span style='color:#666;'>⤷</span> {status_icon} {t['task']}"
+                add_styled_item(html, raw_text=t['task'], indent=True)
 
 
     def add_project(self):
@@ -597,69 +608,38 @@ class ProjectsPage(QWidget):
 
 
     def mark_task_complete(self):
-        """Simple one-click completion that keeps the item selected."""
-        if not hasattr(self, "current_project_data"):
-            return
-        
+        if not hasattr(self, "current_project_data"): return
         selected_item = self.project_detail_list.currentItem()
-        if not selected_item:
-            return
-            
-        # Get the current row index so we can re-select it after refreshing
+    
+        # 🔥 FIX: Get the raw name from UserRole, not .text()
+        task_name = selected_item.data(Qt.UserRole) if selected_item else None
+        if not task_name: return
+    
         current_row = self.project_detail_list.currentRow()
-        
-        # Clean the text to find the raw task name
-        text = selected_item.text()
-        if "⤷" not in text: return
-        
-        # Strip arrows and emojis to get the raw task name
-        clean_name = text.split("⤷")[-1].strip()
-        clean_name = clean_name.replace("✅", "").replace("⬜", "").strip()
 
         for t in self.current_project_data["tasks"]:
-            if t["task"] == clean_name:
-                # Toggle: if complete, make incomplete. If incomplete, make complete.
+            if t["task"] == task_name:
                 t["status"] = "incomplete" if t["status"] == "complete" else "complete"
                 break
 
         active_key = self.get_active_fernet(self.current_project_file)
-        
         if save_project_file(self.username, self.current_project_data, active_key):
             self.display_project(self.project_list.currentItem())
-            # 🔥 THE FIX: Re-select the row so the user doesn't have to click again
             self.project_detail_list.setCurrentRow(current_row)
 
-
-    def delete_task(self):
-        if not hasattr(self, "current_project_data"):
-            return
-        selected_item = self.project_detail_list.currentItem()
-        if not selected_item or not selected_item.text().strip().startswith("⤷"):
-            QMessageBox.warning(self, "No Selection", "Select a task to delete.")
-            return
-        stripped = selected_item.text().replace("⤷", "").replace("✅", "").replace("⬜", "").strip()
-        confirm = QMessageBox.question(self, "Confirm Deletion", f"Are you sure you want to delete:\n\n'{stripped}'?", QMessageBox.Yes | QMessageBox.No)
-        if confirm != QMessageBox.Yes:
-            return
-        self.current_project_data["tasks"] = [t for t in self.current_project_data["tasks"] if t["task"] != stripped]
-        save_project_file(self.username, self.current_project_data, self.fernet)
-        current_item = self.project_list.currentItem()
-        if current_item:
-            self.display_project(current_item)
-
-
     def edit_task(self):
-        if not hasattr(self, "current_project_data"):
-            return
+        if not hasattr(self, "current_project_data"): return
         selected_item = self.project_detail_list.currentItem()
-        if not selected_item or not selected_item.text().strip().startswith("⤷"):
+        
+        # Pull the raw data we stored earlier
+        task_name = selected_item.data(Qt.UserRole) if selected_item else None
+        
+        if not task_name:
             QMessageBox.warning(self, "No Selection", "Select a task to edit.")
             return
 
-        original = selected_item.text().replace("⤷", "").replace("✅", "").replace("⬜", "").strip()
-        task = next((t for t in self.current_project_data["tasks"] if t["task"] == original), None)
-        if not task:
-            return
+        task = next((t for t in self.current_project_data["tasks"] if t["task"] == task_name), None)
+        if not task: return
 
         new_text, ok1 = QInputDialog.getText(self, "Edit Text", "Modify task text:", text=task["task"])
         if not ok1: return
@@ -668,10 +648,24 @@ class ProjectsPage(QWidget):
 
         task["task"] = new_text
         task["status"] = new_status
-        save_project_file(self.username, self.current_project_data, self.fernet)
-        current_item = self.project_list.currentItem()
-        if current_item:
-            self.display_project(current_item)
+        save_project_file(self.username, self.current_project_data, self.get_active_fernet(self.current_project_file))
+        self.display_project(self.project_list.currentItem())
+
+    def delete_task(self):
+        if not hasattr(self, "current_project_data"): return
+        selected_item = self.project_detail_list.currentItem()
+        task_name = selected_item.data(Qt.UserRole) if selected_item else None
+        
+        if not task_name:
+            QMessageBox.warning(self, "No Selection", "Select a task to delete.")
+            return
+
+        confirm = QMessageBox.question(self, "Confirm Deletion", f"Delete task:\n'{task_name}'?", QMessageBox.Yes | QMessageBox.No)
+        if confirm != QMessageBox.Yes: return
+
+        self.current_project_data["tasks"] = [t for t in self.current_project_data["tasks"] if t["task"] != task_name]
+        save_project_file(self.username, self.current_project_data, self.get_active_fernet(self.current_project_file))
+        self.display_project(self.project_list.currentItem())
 
 
     def add_task(self):

@@ -8,9 +8,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from Everything_else.ghostvault import add_secret, get_secrets, delete_secret
 from .style_config import (
-    FONT_FAMILY, FONT_SIZE,
-    COLOR_BG, COLOR_FG, COLOR_BORDER, COLOR_ACCENT, COLOR_BUTTON, COLOR_HIGHLIGHT,
-    STYLE_BUTTON, COLOR_PAGE_BG
+    T, FONT_MAIN, FONT_SIZE, STYLE_BUTTON, STYLE_INPUT
 )
 
 class VaultPage(QWidget):
@@ -23,43 +21,18 @@ class VaultPage(QWidget):
 
         # Main Layout
         self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(25, 25, 25, 25)
+        self.layout.setContentsMargins(30, 30, 30, 30)
         self.layout.setSpacing(15)
-
-        # 1. Header Section (Matching Project Manager Style)
-        header_layout = QVBoxLayout()
-        self.header = QLabel("ENCRYPTED PASSWORD VAULT")
-        self.header.setAlignment(Qt.AlignCenter)
-        self.header.setStyleSheet(f"color: {COLOR_FG}; font-size: {FONT_SIZE + 10}px; font-weight: bold; letter-spacing: 1px; margin-bottom: 5px;")
-        header_layout.addWidget(self.header)
-
-        # The Divider Line
-        line = QFrame()
-        line.setFrameShape(QFrame.HLine)
-        line.setStyleSheet(f"background-color: {COLOR_ACCENT}; min-height: 2px; max-height: 2px;")
-        header_layout.addWidget(line)
-        
-        # Add the header layout to your main container
-        self.layout.addLayout(header_layout)
 
         # 2. SEARCH & ADD
         top_bar = QHBoxLayout()
         self.search_bar = QLineEdit()
         self.search_bar.setPlaceholderText("Search vault entries...")
-        self.search_bar.setFixedHeight(35)
-        self.search_bar.textChanged.connect(self.filter_secrets)
-        self.search_bar.setStyleSheet(f"""
-            QLineEdit {{
-                background-color: {COLOR_PAGE_BG};
-                color: {COLOR_FG};
-                border: 1px solid {COLOR_BUTTON};
-                border-radius: 4px;
-                padding-left: 10px;
-            }}
-        """)
+        self.search_bar.setFixedHeight(40)
+        self.search_bar.setStyleSheet(STYLE_INPUT)
         
         self.add_btn = QPushButton("+ New Entry")
-        self.add_btn.setFixedSize(120, 35)
+        self.add_btn.setFixedSize(140, 40)
         self.add_btn.setStyleSheet(STYLE_BUTTON)
         self.add_btn.clicked.connect(self.add_secret_ui)
         
@@ -67,44 +40,40 @@ class VaultPage(QWidget):
         top_bar.addWidget(self.add_btn)
         self.layout.addLayout(top_bar)
 
-        # 3. VAULT LIST - Refined for sharp selection
+        # 3. VAULT LIST
         self.secret_list = QListWidget()
         self.secret_list.itemDoubleClicked.connect(self.show_secret_popup)
         self.secret_list.setStyleSheet(f"""
             QListWidget {{
-                background-color: {COLOR_PAGE_BG};
-                border: 1px solid {COLOR_BUTTON};
-                border-radius: 4px;
-                color: {COLOR_FG};
-                outline: none; /* Removes the dotted focus circle */
-                padding: 2px;
+                background-color: {T['BG_CARD']};
+                border: 1px solid {T['BORDER']};
+                border-radius: 12px;
+                color: {T['TEXT_MAIN']};
+                padding: 5px;
+                outline: none;
             }}
             QListWidget::item {{
-                padding: 12px;
-                border-bottom: 1px solid {COLOR_BG};
-                margin: 0px;
+                padding: 16px;
+                border-bottom: 1px solid {T['BORDER']};
+                font-family: '{FONT_MAIN}';
             }}
             QListWidget::item:selected {{
-                background-color: {COLOR_HIGHLIGHT};
-                color: {COLOR_BG};
-                border-radius: 0px; /* Sharp edges for a cleaner 'tech' look */
-            }}
-            QListWidget::item:hover {{
-                background-color: {COLOR_HIGHLIGHT};
-                color: {COLOR_BG};
-                opacity: 0.7;
+                background-color: {T['ACCENT_GLOW']};
+                color: {T['ACCENT_SOLID']};
+                font-weight: bold;
+                border-radius: 8px;
             }}
         """)
         self.layout.addWidget(self.secret_list)
 
-        # 4. FOOTER CONTROLS
+        # 4. Footer Controls
         footer = QHBoxLayout()
-        self.edit_btn = QPushButton("Edit Selection")
-        self.del_btn = QPushButton("Delete Entry")
+        self.edit_btn = QPushButton("Edit Entry")
+        self.del_btn = QPushButton("Delete")
         
         for btn in [self.edit_btn, self.del_btn]:
             btn.setStyleSheet(STYLE_BUTTON)
-            btn.setFixedHeight(35)
+            btn.setFixedHeight(38)
             footer.addWidget(btn)
             
         self.edit_btn.clicked.connect(self.edit_selected)
@@ -112,6 +81,7 @@ class VaultPage(QWidget):
         self.layout.addLayout(footer)
 
         self.refresh_vault()
+        self.search_bar.textChanged.connect(self.filter_secrets)
 
     def refresh_vault(self):
         self.secret_list.clear()
@@ -132,58 +102,40 @@ class VaultPage(QWidget):
     def show_secret_popup(self, item):
         secret_name = item.text()
         data = self.secrets.get(secret_name, {})
-
-        # Hybrid Fix for Old Passwords
-        if isinstance(data, dict):
-            u_val = data.get("username", "N/A")
-            p_val = data.get("password", "N/A")
-        else:
-            u_val = "[Legacy No Username]"
-            p_val = str(data)
+        u_val = data.get("username", "N/A") if isinstance(data, dict) else "[Legacy]"
+        p_val = data.get("password", "N/A") if isinstance(data, dict) else str(data)
 
         dialog = QDialog(self)
         dialog.setWindowTitle(f"Vault Entry: {secret_name}")
-        dialog.setFixedWidth(450) # Widened slightly for text buttons
-        dialog.setStyleSheet(f"background-color: {COLOR_BG}; color: {COLOR_FG};")
+        dialog.setFixedWidth(450)
+        dialog.setStyleSheet(f"background-color: {T['BG_DEEP']}; color: {T['TEXT_MAIN']};")
         
         v_layout = QVBoxLayout(dialog)
         v_layout.setContentsMargins(20, 20, 20, 20)
         v_layout.setSpacing(10)
         
-        # Username Section
         v_layout.addWidget(QLabel("<b>USERNAME</b>"))
         u_field = QLineEdit(u_val)
         u_field.setReadOnly(True)
-        u_field.setStyleSheet(f"background: {COLOR_PAGE_BG}; color: {COLOR_FG}; border: 1px solid {COLOR_BUTTON}; padding: 8px;")
+        u_field.setStyleSheet(STYLE_INPUT)
         v_layout.addWidget(u_field)
 
-        # Password Section
         v_layout.addWidget(QLabel("<b>PASSWORD</b>"))
         p_field = QLineEdit(p_val)
         p_field.setEchoMode(QLineEdit.Password)
         p_field.setReadOnly(True)
-        p_field.setStyleSheet(f"background: {COLOR_PAGE_BG}; color: {COLOR_FG}; border: 1px solid {COLOR_BUTTON}; padding: 8px;")
+        p_field.setStyleSheet(STYLE_INPUT)
         v_layout.addWidget(p_field)
 
-        # Action Buttons Row
         h_buttons = QHBoxLayout()
-        
         show_btn = QPushButton("Show Password")
-        show_btn.setFixedHeight(35)
         show_btn.setStyleSheet(STYLE_BUTTON)
-        # Simple toggle logic for the text and masking
-        def toggle_password():
-            if p_field.echoMode() == QLineEdit.Password:
-                p_field.setEchoMode(QLineEdit.Normal)
-                show_btn.setText("Hide Password")
-            else:
-                p_field.setEchoMode(QLineEdit.Password)
-                show_btn.setText("Show Password")
-                
-        show_btn.clicked.connect(toggle_password)
+        def toggle():
+            p_field.setEchoMode(QLineEdit.Normal if p_field.echoMode() == QLineEdit.Password else QLineEdit.Password)
+            show_btn.setText("Hide Password" if p_field.echoMode() == QLineEdit.Normal else "Show Password")
+        show_btn.clicked.connect(toggle)
         
-        copy_btn = QPushButton("Copy to Clipboard")
-        copy_btn.setFixedHeight(35)
+        copy_btn = QPushButton("Copy")
         copy_btn.setStyleSheet(STYLE_BUTTON)
         copy_btn.clicked.connect(lambda: QApplication.clipboard().setText(p_field.text()))
 
@@ -191,14 +143,10 @@ class VaultPage(QWidget):
         h_buttons.addWidget(copy_btn)
         v_layout.addLayout(h_buttons)
 
-        # Close Button
-        v_layout.addSpacing(10)
         close_btn = QPushButton("Close")
         close_btn.setStyleSheet(STYLE_BUTTON)
-        close_btn.setFixedHeight(35)
         close_btn.clicked.connect(dialog.accept)
         v_layout.addWidget(close_btn)
-        
         dialog.exec()
 
     def add_secret_ui(self):
@@ -207,17 +155,17 @@ class VaultPage(QWidget):
 
         dialog = QDialog(self)
         dialog.setWindowTitle(f"New Credentials: {name}")
-        dialog.setStyleSheet(f"background-color: {COLOR_BG}; color: {COLOR_FG};")
+        dialog.setStyleSheet(f"background-color: {T['BG_DEEP']}; color: {T['TEXT_MAIN']};")
         v_layout = QVBoxLayout(dialog)
 
         v_layout.addWidget(QLabel("Username:"))
         u_input = QLineEdit()
-        u_input.setStyleSheet(f"background: {COLOR_PAGE_BG}; color: {COLOR_FG}; border: 1px solid {COLOR_BUTTON}; padding: 8px;")
+        u_input.setStyleSheet(STYLE_INPUT)
         v_layout.addWidget(u_input)
 
         v_layout.addWidget(QLabel("Password:"))
         p_input = QLineEdit()
-        p_input.setStyleSheet(f"background: {COLOR_PAGE_BG}; color: {COLOR_FG}; border: 1px solid {COLOR_BUTTON}; padding: 8px;")
+        p_input.setStyleSheet(STYLE_INPUT)
         v_layout.addWidget(p_input)
 
         gen_btn = QPushButton("🤖 Suggest Strong Password")
@@ -243,26 +191,22 @@ class VaultPage(QWidget):
         
         old_name = selected.text()
         raw_data = self.secrets.get(old_name, "")
-
-        # Hybrid fix for pre-population
-        if isinstance(raw_data, dict):
-            u_init, p_init = raw_data.get("username", ""), raw_data.get("password", "")
-        else:
-            u_init, p_init = "", str(raw_data)
+        u_init = raw_data.get("username", "") if isinstance(raw_data, dict) else ""
+        p_init = raw_data.get("password", "") if isinstance(raw_data, dict) else str(raw_data)
 
         dialog = QDialog(self)
         dialog.setWindowTitle(f"Edit: {old_name}")
-        dialog.setStyleSheet(f"background-color: {COLOR_BG}; color: {COLOR_FG};")
+        dialog.setStyleSheet(f"background-color: {T['BG_DEEP']}; color: {T['TEXT_MAIN']};")
         v_layout = QVBoxLayout(dialog)
 
         v_layout.addWidget(QLabel("Username:"))
         u_input = QLineEdit(u_init)
-        u_input.setStyleSheet(f"background: {COLOR_PAGE_BG}; color: {COLOR_FG}; border: 1px solid {COLOR_BUTTON}; padding: 8px;")
+        u_input.setStyleSheet(STYLE_INPUT)
         v_layout.addWidget(u_input)
 
         v_layout.addWidget(QLabel("Password:"))
         p_input = QLineEdit(p_init)
-        p_input.setStyleSheet(f"background: {COLOR_PAGE_BG}; color: {COLOR_FG}; border: 1px solid {COLOR_BUTTON}; padding: 8px;")
+        p_input.setStyleSheet(STYLE_INPUT)
         v_layout.addWidget(p_input)
 
         save_btn = QPushButton("Update Entry")
@@ -282,8 +226,7 @@ class VaultPage(QWidget):
         selected = self.secret_list.currentItem()
         if not selected: return
         name = selected.text()
-        
-        if QMessageBox.question(self, "Delete", f"Are you sure you want to delete {name}?", QMessageBox.Yes | QMessageBox.No) == QMessageBox.Yes:
+        if QMessageBox.question(self, "Delete", f"Delete {name}?", QMessageBox.Yes | QMessageBox.No) == QMessageBox.Yes:
             try:
                 delete_secret(self.username, self.passphrase, name)
                 self.refresh_vault()
@@ -291,6 +234,5 @@ class VaultPage(QWidget):
                 QMessageBox.critical(self, "Error", str(e))
 
     def generate_password_suggestion(self) -> str:
-        length = random.randint(14, 18)
         chars = string.ascii_letters + string.digits + "!@#$%^&*"
-        return ''.join(random.choices(chars, k=length))
+        return ''.join(random.choices(chars, k=random.randint(14, 18)))

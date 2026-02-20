@@ -122,7 +122,7 @@ EXACT OUTPUT FORMAT:
 ***EXPERTS*** <list of experts>
 
 Current Input: "{user_prompt}"
-### Response:"""
+Response:"""
 
     llm_fn, _ = load_model_from_config("jynx_summarizer")
     summary_buffer = ""
@@ -163,7 +163,7 @@ Task:
 1. Provide a new perspective from your expertise in {field}.
 2. Bring new ideas or contrast your view with the previous expert to ensure a unique contribution.
 3. Try your best, no wrong answers.
-### Response:"""
+Response:"""
 
         llm_fn, _ = load_model_from_config(expert_id)
         expert_buffer = ""
@@ -190,7 +190,7 @@ Format:
 - [Step]
 - [Step]
 - [Step]
-### Verdict:"""
+Verdict:"""
     
     llm_fn, _ = load_model_from_config("jynx_summarizer")
     for chunk in llm_fn(verdict_prompt, stream_override=True, max_tokens=600, temperature=0.2):
