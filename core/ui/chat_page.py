@@ -149,7 +149,7 @@ class ChatPage(QWidget):
         # 4. Input Line - Use the specific ObjectName for consistent styling
         self.input_line = QTextEdit()
         self.input_line.installEventFilter(self)
-        self.input_line.setPlaceholderText("TYPE MESSAGE OR DROP IMAGE...")
+        self.input_line.setPlaceholderText("TYPE MESSAGE OR UPLOAD IMAGE...")
         self.input_line.setFixedHeight(80)
         self.input_line.setObjectName("ChatInput")
         self.main_layout.addWidget(self.input_line)

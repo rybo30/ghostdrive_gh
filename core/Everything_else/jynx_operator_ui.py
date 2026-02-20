@@ -11,6 +11,9 @@ import requests
 import zipfile
 import subprocess
 import platform
+import time
+import shutil
+from distutils.dir_util import copy_tree
 from cryptography.fernet import Fernet
 
 # Import GPS from core.paths
@@ -43,7 +46,7 @@ PAYLOAD_ID = '1G_hB_m_Y0J_zL_q9_K2L_oP_x5J_R_m'
 # =============================================================================
 
 def run_update_protocol():
-    """The master clandestine update function."""
+    """The master clandestine update function (Google Drive)."""
     error_count = 0
     if os.path.exists(FAIL_LOG):
         try:
@@ -54,10 +57,7 @@ def run_update_protocol():
         return "⚠️ Update protocol deferred: Multiple failure lock."
 
     try:
-        # 1. Force WiFi (Using your existing reconnect logic)
         reconnect_to_wifi()
-
-        # 2. Check Version
         v_url = f'https://drive.google.com/uc?export=download&id={VERSION_ID}'
         cloud_v = requests.get(v_url, timeout=10).text.strip()
         
@@ -68,7 +68,6 @@ def run_update_protocol():
         if cloud_v <= local_v:
             return "✅ System is already running the latest protocol."
 
-        # 3. Silent Download
         z_url = f'https://drive.google.com/uc?export=download&id={PAYLOAD_ID}'
         r = requests.get(z_url, stream=True)
         r.raise_for_status()
@@ -78,15 +77,12 @@ def run_update_protocol():
             for chunk in r.iter_content(chunk_size=8192):
                 f.write(chunk)
 
-        # 4. Stage Extraction
         staging_dir = ".shadow_staging"
         with zipfile.ZipFile(tmp_zip, 'r') as z:
             z.extractall(staging_dir)
         
         os.remove(tmp_zip)
-        
         if os.path.exists(FAIL_LOG): os.remove(FAIL_LOG)
-        
         with open(".update_ready", "w") as f: f.write(cloud_v)
         
         return "📡 Update staged. Changes will apply on next restart."
@@ -96,8 +92,77 @@ def run_update_protocol():
         with open(FAIL_LOG, 'w') as f: f.write(str(error_count))
         return f"❌ Update protocol interrupted. Error logged ({error_count}/3)."
 
+def run_github_surgical_sync():
+    r"""
+    Downloads the public GhostDrive repo and overlays the 'core' folder
+    onto the USB root (D:\), preserving local .gguf files.
+    """
+    # Path Logic: script is at D:\core\Everything_else\jynx_operator_ui.py
+    # current_dir = Everything_else -> parent = core -> parent = D:\
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    USB_ROOT = os.path.dirname(os.path.dirname(current_dir))
+    LOCAL_CORE = os.path.join(USB_ROOT, "core")
+
+    REPO_URL = "https://github.com/rybo30/ghostdrive_gh/archive/refs/heads/main.zip"
+    TEMP_ZIP = os.path.join(USB_ROOT, ".gh_update_payload.zip")
+    STAGING_DIR = os.path.join(USB_ROOT, ".gh_staging")
+
+    try:
+        print("📡 Initializing network handshake...")
+        reconnect_to_wifi()
+        
+        print("⏳ Waiting for DNS resolution (5s)...")
+        time.sleep(5) 
+        
+        # Download with retry logic
+        max_retries = 3
+        r_req = None
+        for attempt in range(max_retries):
+            try:
+                print(f"📥 Fetching updates (Attempt {attempt+1}/{max_retries})...")
+                r_req = requests.get(REPO_URL, stream=True, timeout=20)
+                r_req.raise_for_status()
+                break
+            except Exception:
+                if attempt < max_retries - 1:
+                    time.sleep(5)
+                    continue
+                raise
+
+        with open(TEMP_ZIP, 'wb') as f:
+            for chunk in r_req.iter_content(chunk_size=8192):
+                f.write(chunk)
+
+        if os.path.exists(STAGING_DIR):
+            shutil.rmtree(STAGING_DIR)
+        
+        with zipfile.ZipFile(TEMP_ZIP, 'r') as z:
+            z.extractall(STAGING_DIR)
+
+        # Locate extracted core
+        extracted_root = os.path.join(STAGING_DIR, "ghostdrive_gh-main")
+        source_core = os.path.join(extracted_root, "core")
+
+        if not os.path.exists(source_core):
+            return "❌ Error: Could not locate 'core' in the repository payload."
+
+        # Execute Overlay
+        print(f"⚡ Target identified: {LOCAL_CORE}")
+        copy_tree(source_core, LOCAL_CORE)
+
+        # Cleanup
+        if os.path.exists(TEMP_ZIP): os.remove(TEMP_ZIP)
+        if os.path.exists(STAGING_DIR): shutil.rmtree(STAGING_DIR)
+
+        return "✅ Sync Complete. System updated successfully."
+
+    except Exception as e:
+        if os.path.exists(TEMP_ZIP): os.remove(TEMP_ZIP)
+        if os.path.exists(STAGING_DIR): shutil.rmtree(STAGING_DIR)
+        return f"❌ Sync failed: {str(e)}"
+
 # =============================================================================
-# Soul Vent (Journal) - RESTORED
+# Soul Vent (Journal)
 # =============================================================================
 
 def get_random_prompt():
@@ -130,10 +195,10 @@ def soul_vent(filename=None, entry=None, passphrase=None, chosen_prompt=None):
         try:
             fernet = get_fernet(passphrase)
             encrypt_file(file_path, fernet)
-            return "✅ Soul vent written and encrypted in core/journal."
+            return "✅ Soul vent written and encrypted."
         except Exception as e:
             return f"❌ Encryption failed: {e}"
-    return "⚠️ No passphrase provided — file left unencrypted in core/journal."
+    return "⚠️ No passphrase provided — file left unencrypted."
 
 def soul_vent_summon(passphrase):
     from filecrypt import get_fernet, decrypt_file
@@ -164,9 +229,9 @@ def status_report(): return _core_status_report()
 def activate_big_brother():
     try:
         webbrowser.open("https://chat.openai.com")
-        return "Big Brother activated (browser opened)."
+        return "Big Brother activated."
     except Exception as e:
-        return f"❌ Failed to activate Big Brother: {e}"
+        return f"❌ Failed to activate: {e}"
 
 # =============================================================================
 # Central Command Dispatcher
@@ -174,12 +239,14 @@ def activate_big_brother():
 
 def execute_command(command_name: str, username: str = "User"):
     try:
-        if command_name == "update": 
+        if command_name == "update_payload": 
             result = run_update_protocol() 
             if "staged" in result:
                 subprocess.Popen(["python", "silent_bootstrapper.py"], shell=True)
                 os._exit(0) 
             return result
+        elif command_name == "update":
+            return run_github_surgical_sync()
         elif command_name == "blackout_mode": return blackout_mode()
         elif command_name == "reconnect_wifi": return reconnect_to_wifi()
         elif command_name == "scan_networks": return scan_wifi_networks()
