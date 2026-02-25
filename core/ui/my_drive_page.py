@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QColor, QIcon
-from .style_config import T, STYLE_BUTTON, COLOR_ACCENT
+from .style_config import T, STYLE_BUTTON, COLOR_ACCENT, ghost_prompt, ghost_alert
 
 class MyDrivePage(QWidget):
     def __init__(self, engine, manifest):
@@ -62,16 +62,13 @@ class MyDrivePage(QWidget):
         """)
         self.search_bar.textChanged.connect(self.update_search)
         
-        self.upload_btn = QPushButton(" ⇮ UPLOAD ")
+        self.upload_btn = QPushButton("UPLOAD ")
         self.upload_btn.setFixedSize(120, 42)
         self.upload_btn.setCursor(Qt.PointingHandCursor)
-        self.upload_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {COLOR_ACCENT}, stop:1 #1e90ff);
-                color: black; font-weight: 900; border-radius: 21px; border: none; font-size: 12px;
-            }}
-            QPushButton:hover {{ background: white; }}
-        """)
+        
+        # FIX: Changed self.add_btn to self.upload_btn
+        self.upload_btn.setStyleSheet(STYLE_BUTTON) 
+        
         self.upload_btn.clicked.connect(self.open_upload_dialog)
 
         self.header.addWidget(self.breadcrumb_frame)
@@ -91,18 +88,16 @@ class MyDrivePage(QWidget):
         self.folder_scroll = QScrollArea()
         self.folder_scroll.setWidgetResizable(True)
         self.folder_scroll.setFixedHeight(140)
-        # Force the scroll area and its viewport to be transparent
         self.folder_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
         self.folder_scroll.viewport().setStyleSheet("background: transparent;")
         self.folder_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
         self.folder_container = QWidget()
-        # This is the secret sauce: tells the widget not to paint a background
         self.folder_container.setAttribute(Qt.WA_TranslucentBackground)
         self.folder_container.setStyleSheet("background: transparent; border: none;")
         
         self.folder_layout = QHBoxLayout(self.folder_container)
-        self.folder_layout.setContentsMargins(0, 0, 0, 10)
+        self.folder_layout.setContentsMargins(0, 0, 25, 0)
         self.folder_layout.setSpacing(18)
         self.folder_layout.setAlignment(Qt.AlignLeft)
 
@@ -116,34 +111,34 @@ class MyDrivePage(QWidget):
 
         self.file_scroll = QScrollArea()
         self.file_scroll.setWidgetResizable(True)
-        # Force transparency here too
+        
+        self.file_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.file_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        
         self.file_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
         self.file_scroll.viewport().setStyleSheet("background: transparent;")
 
         self.grid_widget = QWidget()
-        # Same secret sauce for the grid container
         self.grid_widget.setAttribute(Qt.WA_TranslucentBackground)
         self.grid_widget.setStyleSheet("background: transparent; border: none;")
         
         self.grid = QGridLayout(self.grid_widget)
-        self.grid.setContentsMargins(0, 0, 0, 0)
+        self.grid.setContentsMargins(0, 0, 10, 0) 
         self.grid.setSpacing(20)
         self.grid.setAlignment(Qt.AlignLeft | Qt.AlignTop)
 
         self.file_scroll.setWidget(self.grid_widget)
         self.layout.addWidget(self.file_scroll)
 
-    # --- THE "COOL" UI GENERATORS ---
-
     def create_folder_card(self, folder_name):
         card = QFrame()
-        card.setObjectName("FolderCard") # This matches the Master Stylesheet
+        card.setObjectName("FolderCard")
         card.setFixedSize(200, 100)
         card.setCursor(Qt.PointingHandCursor)
         
         is_active = (folder_name == self.current_folder)
         accent = COLOR_ACCENT if is_active else "#161b22"
-        bg = "#121d2f" if is_active else "transparent" # Use transparent for inactive
+        bg = "#121d2f" if is_active else "transparent"
 
         card.setStyleSheet(f"""
             QFrame#FolderCard {{ 
@@ -158,7 +153,6 @@ class MyDrivePage(QWidget):
             }}
         """)
 
-        # Add shadow/glow if active
         if is_active:
             glow = QGraphicsDropShadowEffect()
             glow.setBlurRadius(15)
@@ -169,7 +163,6 @@ class MyDrivePage(QWidget):
         l = QVBoxLayout(card)
         l.setContentsMargins(15, 12, 15, 12)
         
-        # Icon Row
         icon_row = QHBoxLayout()
         icon = QLabel("📁")
         icon.setStyleSheet("font-size: 20px; border: none; background: transparent;")
@@ -197,7 +190,7 @@ class MyDrivePage(QWidget):
 
     def create_file_card(self, info):
         card = QFrame()
-        card.setObjectName("FileCard") # Matches the Master Stylesheet
+        card.setObjectName("FileCard")
         card.setFixedSize(170, 180)
         card.setContextMenuPolicy(Qt.CustomContextMenu)
         card.customContextMenuRequested.connect(lambda pos: self.show_context_menu(pos, info, card))
@@ -205,7 +198,6 @@ class MyDrivePage(QWidget):
         ext = info.get('type', '').lower()
         type_color = "#e91e63" if ext == '.pdf' else "#9c27b0" if ext in ['.mp4','.mov'] else COLOR_ACCENT
 
-        # We use !important or specific ID selectors to override style_config
         card.setStyleSheet(f"""
             QFrame#FileCard {{ 
                 background-color: transparent; 
@@ -222,7 +214,6 @@ class MyDrivePage(QWidget):
         l = QVBoxLayout(card)
         l.setContentsMargins(12, 15, 12, 12)
 
-        # Ensure preview is also totally clear
         preview = QFrame()
         preview.setFixedSize(146, 80)
         preview.setStyleSheet("background: transparent; border: none;")
@@ -231,11 +222,10 @@ class MyDrivePage(QWidget):
         emoji = "📕" if ext == '.pdf' else "🎬" if ext in ['.mp4','.mov'] else "📄"
         icon = QLabel(emoji)
         icon.setAlignment(Qt.AlignCenter)
-        icon.setStyleSheet("font-size: 32px; border: none; background: transparent;") # Slightly larger emoji
+        icon.setStyleSheet("font-size: 32px; border: none; background: transparent;")
         pl.addWidget(icon)
         l.addWidget(preview)
 
-        # Content
         name = QLabel(info['name'])
         name.setWordWrap(False) 
         name.setStyleSheet("color: white; font-weight: 800; font-size: 10px; margin-top: 5px; border: none; background: transparent;")
@@ -256,7 +246,6 @@ class MyDrivePage(QWidget):
         meta_row.addWidget(type_tag)
         l.addLayout(meta_row)
 
-        # Subtle energy bar at the bottom
         bar = QFrame()
         bar.setFixedHeight(2)
         bar.setStyleSheet(f"background: {type_color}; border-radius: 1px;")
@@ -264,7 +253,6 @@ class MyDrivePage(QWidget):
 
         return card
 
-    # --- LOGIC MAPPING (Same as your provided logic, just tied to new UI) ---
     def update_search(self, text):
         self.search_query = text.lower().strip()
         self.refresh_grid()
@@ -275,7 +263,6 @@ class MyDrivePage(QWidget):
             item = self.folder_layout.takeAt(0)
             if item.widget(): item.widget().deleteLater()
         
-        # New Folder Card (Tactical Style)
         new_btn = QFrame()
         new_btn.setFixedSize(80, 100)
         new_btn.setCursor(Qt.PointingHandCursor)
@@ -301,13 +288,23 @@ class MyDrivePage(QWidget):
         all_files = self.manifest.get_files()
         target = self.current_folder if self.current_folder else "ROOT"
         
-        filtered = [f for f in all_files if (self.search_query in f.get('name', '').lower()) and (self.search_query or f.get('folder') == (self.current_folder if self.current_folder else "Recent Files"))]
+        filtered = [f for f in all_files if (self.search_query in f.get('name', '').lower()) and 
+                    (self.search_query or f.get('folder') == (self.current_folder if self.current_folder else "Recent Files"))]
         
         self.section_title.setText(f"SCANNING: {target}" if not self.search_query else f"SEARCH RESULTS: {self.search_query}")
         self.path_label.setText(f"VAULT ACCESS // {target.upper()}")
 
+        cols = 4 
         for idx, info in enumerate(filtered):
-            self.grid.addWidget(self.create_file_card(info), idx // 5, idx % 5)
+            row = idx // cols
+            col = idx % cols
+            card = self.create_file_card(info)
+            self.grid.addWidget(card, row, col)
+            
+        if len(filtered) > 0:
+            self.grid.setColumnStretch(cols, 1)
+        else:
+            self.grid.setColumnStretch(0, 1)
 
     def filter_by_folder(self, name):
         self.current_folder = name if name != self.current_folder else None
@@ -315,7 +312,6 @@ class MyDrivePage(QWidget):
         self.refresh_folders()
         self.refresh_grid()
 
-    # (Keep your existing process_file, view_file, decrypt_file, delete_file, and add_new_virtual_folder methods below)
     def open_upload_dialog(self):
         files, _ = QFileDialog.getOpenFileNames(self, "Select Files", "", "All Files (*.*)")
         if files:
@@ -345,19 +341,40 @@ class MyDrivePage(QWidget):
             with open(path, "wb") as f: f.write(self.engine.decrypt_file_to_memory(info['id']))
 
     def delete_file(self, info):
-        self.manifest.remove_entry(info['id'])
-        self.refresh_grid()
-        self.refresh_folders()
+        title = "SECURE ERASE // REQUEST"
+        msg = f"DESTROY OBJECT: {info['name']}?"
+        
+        if ghost_alert(self, title, msg):
+            self.manifest.remove_entry(info['id'])
+            self.refresh_grid()
+            self.refresh_folders()
 
     def add_new_virtual_folder(self):
-        name, ok = QInputDialog.getText(self, "New Folder", "Folder Name:")
-        if ok and name:
-            self.manifest.add_folder(name)
+        name, ok = ghost_prompt(
+            self, 
+            title="FILESYSTEM // NEW SECTOR", 
+            label="ENTER FOLDER DESIGNATION:"
+        )
+        
+        if ok and name.strip():
+            self.manifest.add_folder(name.strip())
             self.refresh_folders()
 
     def show_context_menu(self, pos, info, card):
         menu = QMenu(self)
-        menu.setStyleSheet(f"QMenu {{ background: #0d1117; color: white; border: 1px solid #161b22; }} QMenu::item:selected {{ background: {COLOR_ACCENT}; color: black; }}")
+        # Match the Amber Gold from your popups
+        GOLD = T['PROTOCOL_GOLD'] 
+        menu.setStyleSheet(f"""
+            QMenu {{ 
+                background-color: {T['PROTOCOL_BG']}; 
+                color: {GOLD}; 
+                border: 1px solid {GOLD}; 
+                font-family: 'Consolas';
+                font-size: 10px;
+            }} 
+            QMenu::item {{ padding: 8px 25px; }}
+            QMenu::item:selected {{ background: rgba(255, 176, 0, 0.2); color: white; }}
+        """)
         menu.addAction("👁️ VIEW").triggered.connect(lambda: self.view_file(info))
         menu.addAction("📥 DOWNLOAD").triggered.connect(lambda: self.decrypt_file(info))
         menu.addSeparator()
@@ -369,3 +386,7 @@ class MyDrivePage(QWidget):
         for url in e.mimeData().urls(): self.process_file(url.toLocalFile())
         self.refresh_grid()
         self.refresh_folders()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.refresh_grid()

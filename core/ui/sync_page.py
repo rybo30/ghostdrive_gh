@@ -4,13 +4,14 @@ import threading
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                              QLineEdit, QPushButton, QListWidget, QListWidgetItem,
                              QFrame, QApplication, QCheckBox, QStackedWidget, QProgressBar,  
-                             QMessageBox, QDialog, QDialogButtonBox, QScrollArea)
-from PySide6.QtCore import Qt, Signal
+                             QDialog, QScrollArea)
+from PySide6.QtCore import Qt
 
 # Style and Path Imports
 from ui.style_config import (COLOR_BG, COLOR_FG, COLOR_ACCENT, COLOR_BUTTON, 
                            COLOR_HIGHLIGHT, COLOR_PAGE_BG, COLOR_PROTOCOL, 
-                           COLOR_BORDER, FONT_FAMILY, STYLE_BUTTON)
+                           COLOR_BORDER, FONT_FAMILY, STYLE_BUTTON, STYLE_INPUT,
+                           TacticalDialog, ghost_alert) # Added Tactical imports
 from core.paths import EVERYTHING_ELSE
 from core.network_manager import GhostNetwork 
 
@@ -66,8 +67,9 @@ class SyncPage(QWidget):
         self.my_ip_display.setStyleSheet("color: #555; border: none; background: transparent; font-size: 11px;")
         
         show_ip_btn = QPushButton("SHOW IP")
-        show_ip_btn.setFixedWidth(70)
-        show_ip_btn.setStyleSheet("font-size: 10px; border: 1px solid #444; color: #888;")
+        show_ip_btn.setObjectName("SecondaryBtn") # Use style config secondary
+        show_ip_btn.setFixedWidth(80)
+        show_ip_btn.setStyleSheet(STYLE_BUTTON)
         show_ip_btn.clicked.connect(self.reveal_ip)
         
         copy_btn = QPushButton("COPY ID")
@@ -91,22 +93,24 @@ class SyncPage(QWidget):
         self.sidebar.setStyleSheet(f"background-color: {COLOR_BG}; border-right: 1px solid {COLOR_BORDER};")
         side_layout = QVBoxLayout(self.sidebar)
         
-        side_layout.addWidget(QLabel("AUTHORIZED NETWORK"))
+        side_lbl = QLabel("AUTHORIZED NETWORK")
+        side_lbl.setStyleSheet(f"color: {COLOR_PROTOCOL}; font-size: 10px; font-weight: bold; margin-bottom: 5px;")
+        side_layout.addWidget(side_lbl)
+
         self.peer_list_widget = QListWidget()
         self.peer_list_widget.setStyleSheet(f"""
             QListWidget {{ border: none; background: transparent; color: {COLOR_FG}; outline: none; }}
-            QListWidget::item {{ padding: 15px; border-bottom: 1px solid {COLOR_BUTTON}; }}
+            QListWidget::item {{ padding: 15px; border-bottom: 1px solid {COLOR_BORDER}; }}
             QListWidget::item:selected {{ background-color: {COLOR_HIGHLIGHT}; color: {COLOR_FG}; border-left: 3px solid {COLOR_ACCENT}; }}
         """)
         self.peer_list_widget.currentRowChanged.connect(self.display_peer_details)
         side_layout.addWidget(self.peer_list_widget)
 
-        mgmt_layout = QHBoxLayout()
-        self.delete_btn = QPushButton("Delete")
-        self.delete_btn.setStyleSheet(f"font-size: 10px; padding: 5px; color: {COLOR_FG}; border: 1px solid {COLOR_BORDER};")
+        self.delete_btn = QPushButton("REMOVE PEER")
+        self.delete_btn.setObjectName("SecondaryBtn")
+        self.delete_btn.setStyleSheet(STYLE_BUTTON)
         self.delete_btn.clicked.connect(self.delete_selected_peer)
-        mgmt_layout.addWidget(self.delete_btn)
-        side_layout.addLayout(mgmt_layout)
+        side_layout.addWidget(self.delete_btn)
         
         add_btn = QPushButton("+ ADD NEW PEER")
         add_btn.setStyleSheet(STYLE_BUTTON)
@@ -116,8 +120,9 @@ class SyncPage(QWidget):
 
         # --- CONFIG AREA ---
         self.right_stack = QStackedWidget()
-        empty_msg = QLabel("Select a peer to configure synchronization.")
+        empty_msg = QLabel("SELECT A PEER TO CONFIGURE SYNCHRONIZATION")
         empty_msg.setAlignment(Qt.AlignCenter)
+        empty_msg.setStyleSheet(f"color: {COLOR_BORDER}; letter-spacing: 1px;")
         self.right_stack.addWidget(empty_msg)
 
         self.config_view = QWidget()
@@ -146,8 +151,8 @@ class SyncPage(QWidget):
 
         # MANUAL IP ENTRY
         self.manual_ip_input = QLineEdit()
-        self.manual_ip_input.setPlaceholderText("Target IP (e.g. 72.15.22.4) - Leave blank for Local/Auto")
-        self.manual_ip_input.setStyleSheet(f"background: {COLOR_BG}; color: {COLOR_ACCENT}; padding: 10px; border: 1px solid {COLOR_BORDER}; margin-bottom: 5px;")
+        self.manual_ip_input.setPlaceholderText("TARGET IP (OPTIONAL)")
+        self.manual_ip_input.setStyleSheet(STYLE_INPUT)
         config_layout.addWidget(self.manual_ip_input)
 
         # PROGRESS BAR
@@ -159,9 +164,9 @@ class SyncPage(QWidget):
         self.progress_bar.hide()
         config_layout.addWidget(self.progress_bar)
 
-        self.save_btn = QPushButton("SAVE INITIALIZE HANDSHAKE")
+        self.save_btn = QPushButton("INITIALIZE HANDSHAKE")
         self.save_btn.setStyleSheet(STYLE_BUTTON)
-        self.save_btn.setFixedHeight(45)
+        self.save_btn.setFixedHeight(50)
         self.save_btn.clicked.connect(self.initiate_handshake)
         config_layout.addWidget(self.save_btn)
 
@@ -184,21 +189,23 @@ class SyncPage(QWidget):
         peer_gid = peer_data["ghost_id"]
         recipient_sync_hex = peer_data.get("public_key")
 
-        # 1. Target IP Selection
-        target_ip = self.manual_ip_input.text().strip() # User typed it in
+        target_ip = self.manual_ip_input.text().strip()
         if not target_ip:
-            target_ip = self.network.discovered_peers.get(peer_gid) # Check WiFi
+            target_ip = self.network.discovered_peers.get(peer_gid)
 
         if not target_ip:
-            QMessageBox.warning(self, "Peer Not Found", "Enter a Target IP for global sync or ensure peer is on same WiFi.")
+            err_diag = ghost_alert(self, "OFFLINE", "PEER NOT FOUND ON NETWORK. PLEASE ENTER A MANUAL IP.")
+            if err_diag:
+                err_diag.setStyleSheet("QWidget, QLabel { background: transparent; border: none; }")
+                err_diag.exec()
             return
 
-        # 2. Start Sync
         self.progress_bar.show()
         self.progress_bar.setValue(0)
         
         def run_sync_thread():
             files_to_send = []
+            # Gather Project files
             for i in range(self.project_container.count()):
                 cb = self.project_container.itemAt(i).widget()
                 if isinstance(cb, QCheckBox) and cb.isChecked():
@@ -211,37 +218,39 @@ class SyncPage(QWidget):
                 self.network.send_file(target_ip, path, recipient_sync_hex, 
                                      progress_callback=self.update_progress_safe)
             
-            # Reset UI when done
             self.progress_bar.hide()
 
         threading.Thread(target=run_sync_thread, daemon=True).start()
 
     def update_progress_safe(self, value):
-        # PySide is picky about threads, this ensures the UI updates correctly
         self.progress_bar.setValue(value)
 
     def add_peer_dialog(self):
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Authorize New Peer")
-        dialog.setFixedWidth(400)
-        layout = QVBoxLayout(dialog)
+        # 1. Define a transparency fix for labels and inputs inside the popup
+        popup_fix = "QLabel, QLineEdit { background: transparent; border: none; }"
+
+        # Using custom TacticalDialog for input
+        name_diag = TacticalDialog(self, "AUTHORIZE PEER", "ALIAS:", "e.g. RYAN_LAPTOP")
+        name_diag.setStyleSheet(popup_fix) # Apply the fix locally
         
-        name_in = QLineEdit(); name_in.setPlaceholderText("Alias (e.g., Ryan's Laptop)")
-        id_in = QLineEdit(); id_in.setPlaceholderText("Ghost ID (Node Address)")
-        key_in = QLineEdit(); key_in.setPlaceholderText("Sync Hex (X25519 Key)")
-        
-        layout.addWidget(QLabel("Alias:")); layout.addWidget(name_in)
-        layout.addWidget(QLabel("Ghost ID:")); layout.addWidget(id_in)
-        layout.addWidget(QLabel("Public Sync Hex:")); layout.addWidget(key_in)
-        
-        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        btns.accepted.connect(dialog.accept); btns.rejected.connect(dialog.reject)
-        layout.addWidget(btns)
-        
-        if dialog.exec() == QDialog.Accepted:
-            if name_in.text() and id_in.text() and key_in.text():
-                save_peer(self.username, name_in.text().strip(), id_in.text().strip(), key_in.text().strip(), self.fernet)
-                self.refresh_peer_list()
+        if name_diag.exec() == QDialog.Accepted:
+            alias = name_diag.get_value()
+            
+            id_diag = TacticalDialog(self, "AUTHORIZE PEER", "GHOST ID:", "NODE ADDRESS...")
+            id_diag.setStyleSheet(popup_fix) # Apply the fix locally
+            
+            if id_diag.exec() == QDialog.Accepted:
+                gid = id_diag.get_value()
+                
+                key_diag = TacticalDialog(self, "AUTHORIZE PEER", "SYNC HEX:", "X25519 PUBLIC KEY...")
+                key_diag.setStyleSheet(popup_fix) # Apply the fix locally
+                
+                if key_diag.exec() == QDialog.Accepted:
+                    key = key_diag.get_value()
+                    
+                    if alias and gid and key:
+                        save_peer(self.username, alias, gid, key, self.fernet)
+                        self.refresh_peer_list()
 
     def refresh_peer_list(self):
         self.peer_list_widget.clear()
@@ -255,9 +264,9 @@ class SyncPage(QWidget):
         header_row = QHBoxLayout()
         header_label = QLabel(title)
         header_label.setStyleSheet(f"font-weight: bold; color: {COLOR_PROTOCOL}; font-size: 11px;")
-        select_all = QPushButton("Select All")
+        select_all = QPushButton("SELECT ALL")
         select_all.setFlat(True)
-        select_all.setStyleSheet(f"color: {COLOR_ACCENT}; font-size: 11px; text-decoration: underline;")
+        select_all.setStyleSheet(f"color: {COLOR_ACCENT}; font-size: 11px; text-decoration: underline; border: none;")
         header_row.addWidget(header_label); header_row.addStretch(); header_row.addWidget(select_all)
         layout.addLayout(header_row)
         container = QVBoxLayout(); layout.addLayout(container)
@@ -281,7 +290,11 @@ class SyncPage(QWidget):
         for item in os.listdir(path):
             if filter_ext and not item.endswith(('.enc', '.csv', '.json')): continue
             cb = QCheckBox(item)
-            cb.setStyleSheet(f"padding: 8px; border: 1px solid {COLOR_BORDER}; border-radius: 4px; background: {COLOR_BG}; color: {COLOR_FG};")
+            cb.setStyleSheet(f"""
+                QCheckBox {{ padding: 12px; border: 1px solid {COLOR_BORDER}; border-radius: 6px; background: {COLOR_BG}; color: {COLOR_FG}; margin-bottom: 2px; }}
+                QCheckBox::indicator {{ width: 18px; height: 18px; border: 1px solid {COLOR_ACCENT}; border-radius: 4px; }}
+                QCheckBox::indicator:checked {{ background-color: {COLOR_ACCENT}; }}
+            """)
             container.addWidget(cb)
 
     def display_peer_details(self, index):
@@ -289,15 +302,32 @@ class SyncPage(QWidget):
             self.right_stack.setCurrentIndex(0)
             return
         self.right_stack.setCurrentIndex(1)
-        self.peer_title.setText(f"CONFIGURING: {self.peer_list_widget.currentItem().text()}")
+        self.peer_title.setText(f"CONFIGURING: {self.peer_list_widget.currentItem().text().upper()}")
         self.populate_assets(self.project_container, "projects")
         self.populate_assets(self.inventory_container, "inventory", filter_ext=True)
 
     def delete_selected_peer(self):
         current = self.peer_list_widget.currentItem()
-        if current and delete_peer(self.username, current.text(), self.fernet):
-            self.refresh_peer_list()
-            self.right_stack.setCurrentIndex(0)
+        if current:
+            # 1. Create the dialog
+            dialog = TacticalDialog(self, "DELETE PEER", f"PERMANENTLY REMOVE {current.text()}?")
+            dialog.input_field.hide()
+            dialog.confirm_btn.setText("TERMINATE")
+            
+            # 2. LOCAL FIX: We target the background color directly 
+            # This bypasses the need for the 'T' variable entirely
+            current_style = dialog.container.styleSheet()
+            # We know the background-color is set in TacticalDialog's __init__
+            # We just force it to transparent for this one specific popup
+            dialog.container.setStyleSheet(current_style + "; background-color: transparent;")
+            
+            # Set the "Terminate" button to red
+            dialog.confirm_btn.setStyleSheet(dialog.confirm_btn.styleSheet().replace("#ffb000", "#ff4444"))
+
+            if dialog.exec() == QDialog.Accepted:
+                if delete_peer(self.username, current.text(), self.fernet):
+                    self.refresh_peer_list()
+                    self.right_stack.setCurrentIndex(0)
 
     def copy_id(self):
         QApplication.clipboard().setText(self.ghost_id)

@@ -3,11 +3,11 @@ import sys
 import shutil
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, 
-    QPushButton, QStackedWidget, QLabel, QFrame, QApplication, 
-    QGraphicsDropShadowEffect, QProgressBar
+    QPushButton, QStackedWidget, QLabel, QFrame, QApplication,
+    QProgressBar, QGraphicsDropShadowEffect
 )
-from PySide6.QtCore import Qt, QPoint
-from PySide6.QtGui import QDragEnterEvent, QDropEvent, QColor
+from PySide6.QtCore import Qt, QPoint, QTimer, QPropertyAnimation, QEasingCurve
+from PySide6.QtGui import QColor, QLinearGradient
 
 # --- Logic & Path Imports ---
 from core.paths import USER_DATA, BASE_PATH  
@@ -15,7 +15,7 @@ from core.Everything_else.manifest_manager import ManifestManager
 from core.Everything_else.encryption_engine import GhostEngine
 
 # --- Style Imports ---
-from .style_config import get_master_stylesheet, T, COLOR_BG, COLOR_ACCENT, COLOR_FG
+from .style_config import T, COLOR_BG, COLOR_ACCENT, COLOR_FG
 
 # --- Page Imports ---
 from .my_drive_page import MyDrivePage
@@ -32,42 +32,29 @@ class GhostDriveMainWindow(QMainWindow):
         self.username = username
         self.passphrase = passphrase
         self.fernet = fernet
-        
         self._drag_pos = QPoint()
 
-        # Identity Detection
         app = QApplication.instance()
         self.ghost_id = getattr(app, "ghost_id", "ID_NOT_FOUND")
-        self.private_key = getattr(app, "private_key", None)
-
+        
         self.engine = GhostEngine(self.fernet) 
         self.manifest = ManifestManager(self.engine, self.username)
 
         # --- FRAMELESS CONFIG ---
         self.setWindowFlags(Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        
-        self.setMinimumSize(1120, 770) 
-        self.setAcceptDrops(True) 
+        self.setMinimumSize(1150, 780) 
 
-        # Main Wrapper
+        # Main Layout
         self.main_container = QWidget()
         self.setCentralWidget(self.main_container)
         self.main_layout = QVBoxLayout(self.main_container)
         self.main_layout.setContentsMargins(10, 10, 10, 10) 
 
-        # The Actual Visual Program
+        # Root Widget
         self.root_widget = QFrame()
         self.root_widget.setObjectName("RootWidget")
         self.main_layout.addWidget(self.root_widget)
-
-        # Apply Neon Glow Effect
-        self.glow = QGraphicsDropShadowEffect()
-        self.glow.setBlurRadius(15)
-        self.glow.setXOffset(0)
-        self.glow.setYOffset(0)
-        self.glow.setColor(QColor(COLOR_ACCENT)) 
-        self.root_widget.setGraphicsEffect(self.glow)
 
         self.root_layout = QHBoxLayout(self.root_widget)
         self.root_layout.setContentsMargins(0, 0, 0, 0)
@@ -78,14 +65,25 @@ class GhostDriveMainWindow(QMainWindow):
         self.sidebar.setObjectName("Sidebar")
         self.sidebar.setFixedWidth(260)
         self.sidebar_layout = QVBoxLayout(self.sidebar)
-        self.sidebar_layout.setContentsMargins(20, 30, 20, 30)
-        self.sidebar_layout.setSpacing(8)
+        self.sidebar_layout.setContentsMargins(0, 0, 0, 0)
+        self.sidebar_layout.setSpacing(0)
 
+        # Logo Section
+        self.logo_area = QFrame()
+        self.logo_area.setFixedHeight(80)
+        logo_lay = QVBoxLayout(self.logo_area)
         self.logo_label = QLabel("GHOSTDRIVE")
         self.logo_label.setAlignment(Qt.AlignCenter)
-        self.logo_label.setStyleSheet(f"font-size: 20px; font-weight: 900; color: {COLOR_ACCENT}; letter-spacing: 4px; padding-bottom: 20px; border: none;")
-        self.sidebar_layout.addWidget(self.logo_label)
-        
+        self.logo_label.setStyleSheet("font-size: 20px; font-weight: 900; color: #58a6ff; letter-spacing: 6px; margin-top: 10px;")
+        logo_lay.addWidget(self.logo_label)
+        self.sidebar_layout.addWidget(self.logo_area)
+
+        # Navigation
+        self.nav_container = QFrame()
+        self.nav_layout = QVBoxLayout(self.nav_container)
+        self.nav_layout.setContentsMargins(15, 10, 15, 10)
+        self.nav_layout.setSpacing(4)
+
         self.nav_map = {
             "THE VAULT": "My Drive",
             "GHOST KEYS": "Password Vault",
@@ -101,64 +99,55 @@ class GhostDriveMainWindow(QMainWindow):
             btn = QPushButton(name)
             btn.setObjectName("NavButton")
             btn.setCheckable(True)
-            btn.setFixedHeight(45)
+            btn.setFixedHeight(48)
             btn.setCursor(Qt.PointingHandCursor)
             btn.clicked.connect(self.handle_nav_click)
-            self.sidebar_layout.addWidget(btn)
+            self.nav_layout.addWidget(btn)
             self.nav_buttons[name] = btn
 
+        self.sidebar_layout.addWidget(self.nav_container)
         self.sidebar_layout.addStretch()
+
+        # --- COOLER USER TILE (THE TERMINAL) ---
+        self.user_tile = QFrame()
+        self.user_tile.setObjectName("UserTile")
+        self.user_tile.setFixedHeight(130)
+        tile_lay = QVBoxLayout(self.user_tile)
+        tile_lay.setContentsMargins(20, 15, 20, 15)
+        tile_lay.setSpacing(8)
+
+        # Ident Header
+        ident_row = QHBoxLayout()
+        status_dot = QLabel("●")
+        status_dot.setStyleSheet("color: #238636; font-size: 10px; margin-right: 2px;")
         
-        # --- TACTICAL USER CARD (Storage HUD) ---
-        self.user_card = QFrame()
-        self.user_card.setObjectName("UserCard")
-        self.user_card.setFixedHeight(100)
-        self.user_card.setStyleSheet(f"""
-            QFrame#UserCard {{
-                background: #0d1117; 
-                border: 1px solid #161b22; 
-                border-radius: 8px;
-            }}
-        """)
-        u_layout = QVBoxLayout(self.user_card)
-        u_layout.setContentsMargins(12, 12, 12, 12)
-        u_layout.setSpacing(4)
-
-        # Operator ID Row
-        self.user_name_label = QLabel(f"OPERATOR: {self.username.upper()}")
-        self.user_name_label.setStyleSheet(f"font-weight: 900; color: {COLOR_FG}; font-size: 10px; border: none;")
-        u_layout.addWidget(self.user_name_label)
-
-        # Storage Label
-        total, used, free = shutil.disk_usage(BASE_PATH)
-        free_gb = free // (2**30)
-        used_pct = int((used / total) * 100)
+        ident_label = QLabel(f"IDENTITY: <span style='color: white;'>{self.username.upper()}</span>")
+        ident_label.setStyleSheet("color: #8b949e; font-weight: 800; font-size: 10px; letter-spacing: 1px;")
         
-        self.storage_label = QLabel(f"STORAGE: {free_gb}GB AVAILABLE")
-        self.storage_label.setStyleSheet(f"color: {T['TEXT_DIM']}; font-size: 9px; font-weight: 700; border: none;")
-        u_layout.addWidget(self.storage_label)
+        ident_row.addWidget(status_dot)
+        ident_row.addWidget(ident_label)
+        ident_row.addStretch()
+        tile_lay.addLayout(ident_row)
 
-        # Cool Tactical Progress Bar
+        # Storage Readout
+        self.storage_info = QLabel("CAPACITY: ANALYZING...")
+        self.storage_info.setStyleSheet("color: #8b949e; font-size: 9px; font-family: 'Consolas';")
+        tile_lay.addWidget(self.storage_info)
+
+        # Progress Bar
         self.storage_bar = QProgressBar()
-        self.storage_bar.setFixedHeight(6)
+        self.storage_bar.setObjectName("StorageBar")
+        self.storage_bar.setFixedHeight(3)
         self.storage_bar.setTextVisible(False)
-        self.storage_bar.setRange(0, 100)
-        self.storage_bar.setValue(used_pct)
-        self.storage_bar.setStyleSheet(f"""
-            QProgressBar {{
-                background-color: #070a0e;
-                border: 1px solid #161b22;
-                border-radius: 3px;
-            }}
-            QProgressBar::chunk {{
-                background-color: {COLOR_ACCENT};
-                border-radius: 2px;
-            }}
-        """)
-        u_layout.addWidget(self.storage_bar)
+        tile_lay.addWidget(self.storage_bar)
+        
+        # System Footer
+        sys_footer = QLabel("ENCRYPTION ENGINE: ACTIVE")
+        sys_footer.setStyleSheet("color: rgba(88, 166, 255, 0.4); font-size: 8px; font-weight: bold;")
+        tile_lay.addWidget(sys_footer)
 
-        self.sidebar_layout.addWidget(self.user_card)
-
+        self.sidebar_layout.addWidget(self.user_tile)
+        
         # --- CONTENT AREA ---
         self.content_area = QWidget()
         self.content_layout = QVBoxLayout(self.content_area)
@@ -168,27 +157,26 @@ class GhostDriveMainWindow(QMainWindow):
         self.header = QFrame()
         self.header.setObjectName("Header") 
         self.header.setFixedHeight(60)
-        self.header_layout = QHBoxLayout(self.header)
-        self.header_layout.setContentsMargins(30, 0, 15, 0)
+        h_lay = QHBoxLayout(self.header)
+        h_lay.setContentsMargins(35, 0, 15, 0)
         
         self.header_title = QLabel("THE VAULT")
-        self.header_title.setStyleSheet(f"font-size: 20px; font-weight: 900; color: {COLOR_FG}; border: none;")
-        self.header_layout.addWidget(self.header_title)
-        self.header_layout.addStretch()
+        self.header_title.setStyleSheet("font-size: 16px; font-weight: 800; color: #c9d1d9; letter-spacing: 1px;")
+        h_lay.addWidget(self.header_title)
+        h_lay.addStretch()
 
-        # WINDOW CONTROLS
         self.min_btn = QPushButton("—")
-        self.min_btn.setObjectName("WindowCtrl")
+        self.min_btn.setObjectName("Ctrl")
+        self.min_btn.setFixedSize(30, 30)
         self.min_btn.clicked.connect(self.showMinimized)
-        
-        self.close_btn = QPushButton("✕")
-        self.close_btn.setObjectName("WindowCtrlClose")
-        self.close_btn.clicked.connect(self.close)
-        
-        self.header_layout.addWidget(self.min_btn)
-        self.header_layout.addWidget(self.close_btn)
+        h_lay.addWidget(self.min_btn)
 
-        # STACKED PAGES
+        self.close_btn = QPushButton("✕")
+        self.close_btn.setObjectName("CtrlClose")
+        self.close_btn.setFixedSize(30, 30)
+        self.close_btn.clicked.connect(self.close)
+        h_lay.addWidget(self.close_btn)
+
         self.stack = QStackedWidget()
         self.pages = {
             "My Drive": MyDrivePage(self.engine, self.manifest),
@@ -197,9 +185,11 @@ class GhostDriveMainWindow(QMainWindow):
             "Password Vault": VaultPage(username, passphrase, fernet),
             "Projects": ProjectsPage(username, passphrase, fernet),
             "Inventory": InventoryPage(username, passphrase, fernet),
-            "Sync": SyncPage(username, fernet, self.ghost_id, self.private_key)
+            "Sync": SyncPage(username, fernet, self.ghost_id, getattr(app, "private_key", None))
         }
-        for page in self.pages.values(): self.stack.addWidget(page)
+
+        for page in self.pages.values(): 
+            self.stack.addWidget(page)
 
         self.content_layout.addWidget(self.header)
         self.content_layout.addWidget(self.stack)
@@ -209,6 +199,57 @@ class GhostDriveMainWindow(QMainWindow):
         self.apply_tactical_styles()
         self.nav_buttons["THE VAULT"].setChecked(True)
         self.center_window()
+        self.update_storage_stats()
+
+    def apply_tactical_styles(self):
+        ACCENT = "#58a6ff"
+        BG_DARK = "#0d1117"
+        SIDEBAR_BG = "#080b10"
+        
+        self.setStyleSheet(f"""
+            QFrame#RootWidget {{ background-color: {BG_DARK}; border: 1px solid #30363d; border-radius: 8px; }}
+            QFrame#Sidebar {{ background-color: {SIDEBAR_BG}; border-right: 1px solid #161b22; }}
+            QFrame#Header {{ background-color: {BG_DARK}; border-bottom: 1px solid #161b22; }}
+            QFrame#UserTile {{ background-color: rgba(255,255,255,0.02); border-top: 1px solid #161b22; }}
+
+            QPushButton#NavButton {{ 
+                background: transparent; color: #8b949e; border: none; border-radius: 4px;
+                text-align: left; padding-left: 15px; font-weight: 700; font-size: 11px; letter-spacing: 1px;
+            }}
+            QPushButton#NavButton:hover {{ background: rgba(88, 166, 255, 0.05); color: {ACCENT}; }}
+            QPushButton#NavButton:checked {{ 
+                color: white; background: {ACCENT}; font-weight: 900; border-left: 4px solid #ffffff; 
+            }}
+
+            QPushButton#Ctrl {{ background: transparent; color: #8b949e; border: none; font-size: 12px; }}
+            QPushButton#CtrlClose {{ background: transparent; color: #8b949e; border: none; font-size: 12px; }}
+            QPushButton#Ctrl:hover {{ color: white; background: #30363d; border-radius: 4px; }}
+            QPushButton#CtrlClose:hover {{ color: white; background: #da3633; border-radius: 4px; }}
+
+            QProgressBar#StorageBar {{ background-color: #161b22; border: none; border-radius: 1px; }}
+            QProgressBar#StorageBar::chunk {{ background-color: {ACCENT}; }}
+        """)
+
+    def update_storage_stats(self):
+        try:
+            total, used, free = shutil.disk_usage(BASE_PATH)
+            percent_used = int((used / total) * 100)
+            free_gb = free / (1024**3)
+            self.storage_bar.setValue(percent_used)
+            self.storage_info.setText(f"CAPACITY: {free_gb:.1f} GB SECURE")
+        except:
+            self.storage_info.setText("CAPACITY: ERROR")
+
+    def handle_nav_click(self):
+        sender = self.sender()
+        if not sender: return
+        for btn in self.nav_buttons.values(): btn.setChecked(False)
+        sender.setChecked(True)
+        display_text = sender.text().strip()
+        logical_key = self.nav_map.get(display_text)
+        if logical_key in self.pages:
+            self.stack.setCurrentWidget(self.pages[logical_key])
+            self.header_title.setText(display_text)
 
     def center_window(self):
         qr = self.frameGeometry()
@@ -225,49 +266,3 @@ class GhostDriveMainWindow(QMainWindow):
         if event.buttons() == Qt.LeftButton and self.header.underMouse():
             self.move(event.globalPosition().toPoint() - self._drag_pos)
             event.accept()
-
-    def apply_tactical_styles(self):
-        self.setStyleSheet(f"""
-            QFrame#RootWidget {{ 
-                background-color: {COLOR_BG}; 
-                border: 2px solid {COLOR_ACCENT}; 
-                border-radius: 12px; 
-            }}
-            QFrame#Sidebar {{ 
-                background-color: #070a0e; 
-                border-right: 1px solid #161b22; 
-                border-top-left-radius: 10px; 
-                border-bottom-left-radius: 10px; 
-            }}
-            QFrame#Header {{ background: transparent; border-bottom: 1px solid #161b22; }}
-            
-            QPushButton#NavButton {{
-                background: transparent; color: {T['TEXT_DIM']}; border: none;
-                text-align: left; padding-left: 15px; font-weight: 700;
-            }}
-            QPushButton#NavButton:checked {{
-                color: {COLOR_ACCENT}; background: #121d2f; border-left: 3px solid {COLOR_ACCENT};
-            }}
-            
-            QPushButton#WindowCtrl, QPushButton#WindowCtrlClose {{
-                background: transparent; color: {T['TEXT_DIM']}; font-size: 16px; width: 30px; border: none;
-            }}
-            QPushButton#WindowCtrlClose:hover {{ color: #ff4444; }}
-            QPushButton#WindowCtrl:hover {{ color: {COLOR_ACCENT}; }}
-        """)
-
-    def handle_nav_click(self):
-        sender = self.sender()
-        for btn in self.nav_buttons.values(): btn.setChecked(False)
-        sender.setChecked(True)
-        logical_key = self.nav_map.get(sender.text().strip())
-        if logical_key in self.pages:
-            self.stack.setCurrentWidget(self.pages[logical_key])
-            self.header_title.setText(sender.text().strip())
-
-    def dragEnterEvent(self, e): 
-        if e.mimeData().hasUrls(): e.acceptProposedAction()
-    def dropEvent(self, e):
-        files = [u.toLocalFile() for u in e.mimeData().urls()]
-        if isinstance(self.stack.currentWidget(), MyDrivePage):
-            self.stack.currentWidget().handle_dropped_files(files)

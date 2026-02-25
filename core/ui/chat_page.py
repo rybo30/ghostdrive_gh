@@ -1,3 +1,5 @@
+# [chat_page.py]
+
 import sys, os, gc, importlib
 import re
 import random
@@ -13,10 +15,10 @@ from .style_config import (
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QTextEdit, QLineEdit, QPushButton,
     QHBoxLayout, QMessageBox, QInputDialog, QFileDialog, QLabel, QApplication,
-    QDialog, QDialogButtonBox
+    QDialog, QDialogButtonBox, QFrame, QListWidget
 )
 from PySide6.QtCore import Qt, QThread, Signal, QObject, QEvent, QTimer
-from PySide6.QtGui import QTextCursor, QTextOption, QFont, QPixmap
+from PySide6.QtGui import QTextCursor, QTextOption, QFont, QPixmap, QKeyEvent
 
 # --- System Imports ---
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'Everything_else'))
@@ -92,6 +94,109 @@ class CouncilStreamWorker(QObject):
         except Exception as e:
             self.error.emit(str(e))
 
+
+# =====================================================================
+# Dialog Components (Parent must come before Child)
+# =====================================================================
+
+class ProtocolDialog(QDialog):
+    def __init__(self, parent=None, title="SYSTEM COMMAND", label="INPUT:", placeholder="...", is_password=False, is_multiline=False, readonly_text=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setFixedWidth(500 if (is_multiline or readonly_text) else 400)
+        
+        self.container = QFrame(self)
+        self.container.setObjectName("ProtocolBox")
+        self.container.setStyleSheet(f"QFrame#ProtocolBox {{ background-color: {T['PROTOCOL_BG']}; border: 2px solid {T['PROTOCOL_GOLD']}; border-radius: 12px; }}")
+        
+        layout = QVBoxLayout(self.container)
+        
+        # Tactical Header
+        header = QLabel(title.upper())
+        header.setStyleSheet(f"color: {T['PROTOCOL_GOLD']}; font-weight: 900; letter-spacing: 3px; font-size: 11px;")
+        layout.addWidget(header)
+        
+        # Scanline
+        line = QFrame()
+        line.setFixedHeight(1)
+        line.setStyleSheet(f"background-color: {T['HUD_LINE']};")
+        layout.addWidget(line)
+
+        # "Friendly" Sequence ID Label Styling
+        label_widget = QLabel(label)
+        label_widget.setStyleSheet(f"color: {T['PROTOCOL_GOLD']}; font-family: 'Consolas', 'Courier New'; font-size: 12px; letter-spacing: 1px; margin-top: 10px;")
+        layout.addWidget(label_widget)
+
+        # Body
+        if readonly_text:
+            self.input_field = QTextEdit()
+            self.input_field.setPlainText(readonly_text)
+            self.input_field.setReadOnly(True)
+            self.input_field.setMinimumHeight(200)
+        elif is_multiline:
+            self.input_field = QTextEdit()
+            self.input_field.setMinimumHeight(200)
+        else:
+            self.input_field = QLineEdit()
+            if is_password: self.input_field.setEchoMode(QLineEdit.Password)
+        
+        self.input_field.setPlaceholderText(placeholder)
+        self.input_field.setStyleSheet(f"QWidget {{ background: rgba(0,0,0,0.5); color: {T.get('PROTOCOL_FG', T['PROTOCOL_GOLD'])}; border: 1px solid {T['HUD_LINE']}; border-radius: 4px; padding: 12px; font-family: 'Consolas', 'Courier New'; font-size: 14px; }}")
+        layout.addWidget(self.input_field)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        self.confirm_btn = QPushButton("CLOSE" if readonly_text else "CONFIRM")
+        self.cancel_btn = QPushButton("ABORT")
+        
+        s = f"QPushButton {{ background: transparent; border: 1px solid {T['HUD_LINE']}; color: {T['TEXT_DIM']}; padding: 8px; font-weight: bold; }}"
+        self.cancel_btn.setStyleSheet(s)
+        self.confirm_btn.setStyleSheet(s.replace(T['TEXT_DIM'], T['PROTOCOL_GOLD']).replace("transparent", "rgba(255,176,0,0.1)"))
+
+        if readonly_text: self.cancel_btn.hide()
+
+        self.confirm_btn.setDefault(True)
+        self.input_field.setFocus()
+        
+        btn_layout.addWidget(self.cancel_btn)
+        btn_layout.addWidget(self.confirm_btn)
+        layout.addLayout(btn_layout)
+
+        self.confirm_btn.clicked.connect(self.accept)
+        self.cancel_btn.clicked.connect(self.reject)
+        QVBoxLayout(self).addWidget(self.container)
+
+    def get_value(self):
+        return self.input_field.toPlainText() if isinstance(self.input_field, QTextEdit) else self.input_field.text()
+
+
+class ProtocolSelectDialog(ProtocolDialog):  # Now Python knows what ProtocolDialog is!
+    def __init__(self, parent, title, label, items):
+        super().__init__(parent, title=title, label=label)
+        self.input_field.hide()
+        
+        self.list_widget = QListWidget()
+        self.list_widget.addItems(items)
+        self.list_widget.setStyleSheet(f"""
+            QListWidget {{
+                background: rgba(0,0,0,0.5);
+                color: {T['PROTOCOL_GOLD']};
+                border: 1px solid {T['HUD_LINE']};
+                border-radius: 4px;
+                font-family: 'Consolas';
+            }}
+            QListWidget::item {{ padding: 10px; }}
+            QListWidget::item:selected {{ background: {T['PROTOCOL_GOLD']}; color: black; }}
+        """)
+        self.container.layout().insertWidget(4, self.list_widget)
+
+    def get_value(self):
+        selected = self.list_widget.selectedItems()
+        return selected[0].text() if selected else None
+
+
 # =====================================================================
 # Main ChatPage UI
 # =====================================================================
@@ -160,6 +265,7 @@ class ChatPage(QWidget):
         
         # Attach Button (+)
         self.attach_btn = QPushButton("+")
+        self.attach_btn.setStyleSheet(STYLE_BUTTON) 
         self.attach_btn.setObjectName("PlusBtn")
         
         # Main Actions
@@ -333,12 +439,21 @@ class ChatPage(QWidget):
 
     def eventFilter(self, obj, event):
         if obj == self.input_line and event.type() == QEvent.KeyPress:
-            if event.key() in (Qt.Key_Return, Qt.Key_Enter):
-                if event.modifiers() & Qt.ControlModifier:
-                    self.handle_reason()
-                else:
-                    self.handle_prompt()
-                return True
+            # This is the line that fixes the AttributeError in Python 3.12
+            # It casts the generic QInputEvent into a proper QKeyEvent
+            key_event = QKeyEvent(event) 
+            
+            if hasattr(key_event, 'key'):
+                key_code = key_event.key()
+                
+                if key_code in (Qt.Key_Return, Qt.Key_Enter):
+                    if event.modifiers() & Qt.ControlModifier:
+                        self.handle_reason()
+                        return True 
+                    else:
+                        self.handle_prompt()
+                        return True 
+                        
         return super().eventFilter(obj, event)
 
     # --- Standard Support Methods ---
@@ -369,35 +484,51 @@ class ChatPage(QWidget):
 
 
     def manual_protocol_trigger(self):
-        protocol, ok = QInputDialog.getText(self, "Protocol", "ID:")
-        if not ok or not protocol: return
-        
+        d = ProtocolDialog(self, title="GHOSTDRIVE // PROTOCOL", label="SEQUENCE ID:")
+        if d.exec() != QDialog.Accepted: return
+        protocol = d.get_value().strip()
+
+        # 1. Specialized UI Protocols
         if protocol == "soul_vent":
-            fname, ok1 = QInputDialog.getText(self, "Soul Vent", "Journal ID:")
-            if not ok1: return
+            d1 = ProtocolDialog(self, title="SOUL VENT // INITIALIZE", label="JOURNAL ID:")
+            if d1.exec() != QDialog.Accepted: return
+            fname = d1.get_value()
+
             pmp = get_random_prompt()
-            entry, ok2 = self.get_multiline_input("Soul Vent", "INPUT:", f"{pmp}\n\n")
-            if not ok2: return
-            key, ok3 = QInputDialog.getText(self, "Soul Vent", "Key:", QLineEdit.Password)
-            if ok3:
-                try:
-                    soul_vent(fname, entry, key, chosen_prompt=pmp)
-                    self.append_message("Soul Vent", "ENCRYPTED.")
-                except Exception as e: self.append_message("Error", str(e))
+            d2 = ProtocolDialog(self, title="SOUL VENT // DATA ENTRY", label="ENCRYPT MESSAGE:", placeholder=f"{pmp}...", is_multiline=True)
+            if d2.exec() != QDialog.Accepted: return
+            entry = d2.get_value()
+
+            d3 = ProtocolDialog(self, title="SOUL VENT // KEY SIGNATURE", label="AES KEY:", is_password=True)
+            if d3.exec() != QDialog.Accepted: return
+            
+            try:
+                soul_vent(fname, entry, d3.get_value(), chosen_prompt=pmp)
+                self.append_message("Soul Vent", "DATA ENCRYPTED AND STORED.")
+            except Exception as e: self.append_message("Error", str(e))
+
         elif protocol == "soul_vent_summon":
-            key, ok1 = QInputDialog.getText(self, "Summon", "Key:", QLineEdit.Password)
-            if ok1:
+            d_key = ProtocolDialog(self, title="SUMMON // KEY AUTH", label="AES KEY:", is_password=True)
+            if d_key.exec() == QDialog.Accepted:
                 try:
-                    fnames, dmap = soul_vent_summon(key)
-                    if not fnames: return
-                    sel, ok2 = QInputDialog.getItem(self, "Entry", "SELECT ID:", fnames, 0, False)
-                    if ok2: self._show_readonly_dialog(sel, dmap[sel])
-                except Exception as e: self.append_message("Error", str(e))
+                    fnames, dmap = soul_vent_summon(d_key.get_value())
+                    sel_dialog = ProtocolSelectDialog(self, title="SUMMON // ENTRY SELECT", label="CHOOSE ENCRYPTED DATA:", items=fnames)
+                    if sel_dialog.exec() == QDialog.Accepted:
+                        sel = sel_dialog.get_value()
+                        if sel:
+                            view = ProtocolDialog(self, title=f"ENTRY // {sel}", label="DECRYPTED CONTENT:", readonly_text=dmap[sel])
+                            view.exec()
+                except Exception as e: 
+                    self.append_message("Error", f"DECRYPTION FAILED: {str(e)}")
+
+        # 2. DEFAULT FALLBACK (This is what was missing!)
+        # This sends 'status_report', 'blackout_mode', etc. to the backend
         else:
             try:
-                res = execute_command(protocol, username=self.username)
-                self.append_message("Protocol", res)
-            except Exception as e: self.append_message("Error", str(e))
+                response = execute_command(protocol)
+                self.append_message("SYSTEM", response)
+            except Exception as e:
+                self.append_message("SYSTEM", f"PROTOCOL ERROR: {str(e)}")
 
     def _show_readonly_dialog(self, title, text):
         d = QDialog(self)

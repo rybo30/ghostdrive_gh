@@ -13,7 +13,7 @@ import subprocess
 import platform
 import time
 import shutil
-from distutils.dir_util import copy_tree
+from shutil import copytree as copy_tree
 from cryptography.fernet import Fernet
 
 # Import GPS from core.paths

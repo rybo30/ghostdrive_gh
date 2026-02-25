@@ -1,3 +1,5 @@
+# [ghostvault.py]
+
 import os
 import json
 from cryptography.fernet import Fernet
@@ -45,8 +47,13 @@ def decrypt_vault(fernet, vault_path):
         return {}
     with open(vault_path, "rb") as f:
         encrypted = f.read()
-    decrypted = fernet.decrypt(encrypted).decode()
-    return json.loads(decrypted)
+    try:
+        decrypted_bytes = fernet.decrypt(encrypted)
+        return json.loads(decrypted_bytes.decode('utf-8'))
+    except Exception as e:
+        # This prevents the red codec error by returning an empty dict or error flag
+        print(f"DEBUG: Vault Decryption Failed (Memory Corruption?): {e}")
+        return {"ERROR": "DECRYPTION_FAILURE"}
 
 def create_new_user(username, passphrase):
     vault_path, salt_path = get_vault_paths(username)

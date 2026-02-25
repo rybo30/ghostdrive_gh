@@ -1,3 +1,5 @@
+# [project_page.py]
+
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QListWidget, QLabel, QPushButton, QInputDialog, QMessageBox,
     QListWidgetItem, QHBoxLayout, QProgressBar, QLineEdit, QFrame,
@@ -8,7 +10,8 @@ from project_manager import list_project_files, load_project_file, save_project_
 from core.paths import PROJECTS_DIR, EVERYTHING_ELSE
 import os
 from .style_config import (
-    T, FONT_MAIN, FONT_SIZE, STYLE_BUTTON, STYLE_INPUT
+    T, FONT_MAIN, FONT_SIZE, STYLE_BUTTON, STYLE_INPUT,
+    ghost_prompt, ghost_alert, TacticalDialog
 )
 
 class ProjectsPage(QWidget):
@@ -105,17 +108,15 @@ class ProjectsPage(QWidget):
         task_btn_layout = QHBoxLayout()
         buttons = [
             ("Done ✅", self.mark_task_complete),
-            ("Add Task", self.add_task),
             ("Edit Task", self.edit_task),
-            ("Kill Task", self.delete_task),      # Shortened "Kill Task"
+            ("Kill Task", self.delete_task),
             ("Edit Proj.", self.edit_project_details),
-            ("Delete", self.delete_project)   # Shortened "Delete"
+            ("Delete", self.delete_project)
         ]
         
         for text, func in buttons:
             btn = QPushButton(text)
             
-            # Use 'in' to check for keywords so colors don't break if you change emojis
             if "Delete" in text or "Purge" in text:
                 btn.setStyleSheet(f"""
                     QPushButton {{
@@ -130,7 +131,6 @@ class ProjectsPage(QWidget):
                     QPushButton:hover {{ background-color: #c9302c; }}
                 """) 
             else:
-                # Apply standard style but slightly smaller font for the compact fit
                 btn.setStyleSheet(STYLE_BUTTON + f"; font-size: 11px; font-weight: 800; padding: 8px;")
             
             btn.clicked.connect(func)
@@ -211,42 +211,61 @@ class ProjectsPage(QWidget):
 
 
     def edit_project_details(self):
-        """Aligned and dynamic dialog for editing project info."""
+        """Aligned and dynamic dialog for editing project info using TacticalDialog."""
         if not hasattr(self, "current_project_data"):
             return
 
         data = self.current_project_data
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Edit Project Command Center")
-        dialog.setMinimumWidth(500)
-        main_layout = QVBoxLayout(dialog)
+        
+        # 1. Initialize our custom TacticalDialog
+        # We set label to "PROJECT PARAMETERS" to fit the theme
+        dialog = TacticalDialog(self, title="PROJECT CONFIGURATION", label="MISSION PARAMETERS")
+        
+        # 2. Hide the default single input field since we are building a custom form
+        dialog.input_field.hide()
+        
+        # 3. Build the custom form layout
+        form_container = QWidget()
+        form_layout = QFormLayout(form_container)
+        form_layout.setSpacing(10)
 
-        # ─── SECTION 1: ALIGNED CORE INFO ──────────────────────────
-        # QFormLayout ensures labels and inputs align perfectly
-        form_layout = QFormLayout()
+        # Apply specific styling to labels within the form to match the gold theme
+        label_style = f"color: {T['PROTOCOL_GOLD']}; font-family: 'Consolas'; font-size: 11px; font-weight: bold;"
+        
         name_input = QLineEdit(data["project"])
         desc_input = QLineEdit(data["description"])
         date_input = QLineEdit(data["deadline"])
         
-        form_layout.addRow("Project Name:", name_input)
-        form_layout.addRow("Description:", desc_input)
-        form_layout.addRow("Deadline:", date_input)
-        main_layout.addLayout(form_layout)
+        # Apply the tactical input style
+        for inp in [name_input, desc_input, date_input]:
+            inp.setStyleSheet(STYLE_INPUT)
 
-        # ─── SECTION 2: DYNAMIC GOALS ──────────────────────────────
-        main_layout.addWidget(QLabel("\nPROJECT GOALS:"))
+        # Create custom labels for the form to ensure they look "Tactical"
+        lbl_name = QLabel("PROJECT NAME:"); lbl_name.setStyleSheet(label_style)
+        lbl_desc = QLabel("DESCRIPTION:"); lbl_desc.setStyleSheet(label_style)
+        lbl_date = QLabel("DEADLINE:"); lbl_date.setStyleSheet(label_style)
+
+        form_layout.addRow(lbl_name, name_input)
+        form_layout.addRow(lbl_desc, desc_input)
+        form_layout.addRow(lbl_date, date_input)
+
+        # 4. Handle Goals Section
+        goals_header = QLabel("\nOPERATIONAL GOALS:")
+        goals_header.setStyleSheet(f"color: {T['PROTOCOL_GOLD']}; font-weight: bold; font-size: 10px; letter-spacing: 1px;")
+        
         goals_container = QVBoxLayout()
         goal_inputs = []
 
         def add_goal_row(initial_val=""):
             row_layout = QHBoxLayout()
             new_input = QLineEdit(initial_val)
+            new_input.setStyleSheet(STYLE_INPUT)
             goal_inputs.append(new_input)
             row_layout.addWidget(new_input)
             
             del_btn = QPushButton("✕")
             del_btn.setFixedWidth(30)
-            del_btn.setStyleSheet("color: red; border: none; font-weight: bold;")
+            del_btn.setStyleSheet("color: #da3633; background: transparent; border: 1px solid #da3633; border-radius: 4px; font-weight: bold;")
             del_btn.clicked.connect(lambda: remove_goal_row(row_layout, new_input))
             row_layout.addWidget(del_btn)
             goals_container.addLayout(row_layout)
@@ -263,19 +282,47 @@ class ProjectsPage(QWidget):
         for g in data.get("goals", []):
             add_goal_row(g)
 
-        main_layout.addLayout(goals_container)
 
-        add_more_btn = QPushButton("+ Add Another Goal")
-        add_more_btn.setStyleSheet(STYLE_BUTTON)
+        add_more_btn = QPushButton("+ ADD PROJECT GOAL")
+        
+        GOLD = T['PROTOCOL_GOLD']
+        BG_ALPHA = "rgba(255, 176, 0, 0.15)" # Same alpha used in Confirm button
+        LINE = T['HUD_LINE']
+
+        add_more_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {BG_ALPHA};
+                color: {GOLD};
+                border: 1px solid {LINE};
+                border-radius: 4px;
+                padding: 10px;
+                font-family: 'Consolas';
+                font-weight: bold;
+                font-size: 11px;
+                letter-spacing: 1px;
+            }}
+            QPushButton:hover {{
+                background-color: rgba(255, 176, 0, 0.25);
+                border: 1px solid {GOLD};
+            }}
+            QPushButton:pressed {{
+                background-color: {T['BG_HOVER']};
+            }}
+        """)
+        add_more_btn.setCursor(Qt.PointingHandCursor)
         add_more_btn.clicked.connect(lambda: add_goal_row())
-        main_layout.addWidget(add_more_btn)
 
-        # ─── SECTION 3: ACTIONS ────────────────────────────────────
-        btns = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
-        btns.accepted.connect(dialog.accept)
-        btns.rejected.connect(dialog.reject)
-        main_layout.addWidget(btns)
+        # 5. Inject everything into the TacticalDialog's layout
+        target_layout = dialog.container.layout()
+        target_layout.insertWidget(3, form_container)
+        target_layout.insertWidget(4, goals_header)
+        target_layout.insertLayout(5, goals_container)
+        target_layout.insertWidget(6, add_more_btn)
+        
+        # Add a small spacer after the button to separate it from the Confirm/Abort row
+        target_layout.insertSpacing(7, 10)
 
+        # 6. Execute and Save
         if dialog.exec() == QDialog.Accepted:
             updated_goals = [i.text().strip() for i in goal_inputs if i.text().strip()]
             data["project"] = name_input.text().strip()
@@ -284,13 +331,8 @@ class ProjectsPage(QWidget):
             data["goals"] = updated_goals
 
             if save_project_file(self.username, data, self.fernet):
-                # 1. Refresh the sidebar list
                 self.load_projects()
-                
-                # 2. Find the new name in the list (formatted as filename)
                 target_name = data["project"].replace(" ", "_").lower()
-                
-                # 3. Re-select the item so display_project has a valid target
                 for i in range(self.project_list.count()):
                     if self.project_list.item(i).text().lower() == target_name:
                         self.project_list.setCurrentRow(i)
@@ -383,45 +425,57 @@ class ProjectsPage(QWidget):
         if not task_text or not hasattr(self, "current_project_data"):
             return
 
-        # --- CONTEXTUAL LOGIC ---
-        # Find the currently selected item in the project detail list
+        # 1. Grab current selection
         selected_item = self.project_detail_list.currentItem()
         target_goal = None
 
+        # 2. Contextual Detection using UserRole data
         if selected_item:
-            current_text = selected_item.text()
-            # If a goal header is selected (starts with 🎯)
-            if "🎯" in current_text:
-                target_goal = current_text.replace("🎯", "").strip().title()
-            # If a task is selected (starts with ⤷), find its parent goal
-            elif "⤷" in current_text:
-                # Iterate backwards from current row to find the nearest Goal header
-                curr_row = self.project_detail_list.currentRow()
-                for i in range(curr_row, -1, -1):
-                    header_text = self.project_detail_list.item(i).text()
-                    if "🎯" in header_text:
-                        target_goal = header_text.replace("🎯", "").strip().title()
-                        break
+            # We stored the Goal Name in UserRole + 1 during display_project
+            target_goal = selected_item.data(Qt.UserRole + 1)
+            curr_row = self.project_detail_list.currentRow()
+        else:
+            curr_row = 0
+
+        # 3. Fallback to first goal if nothing is selected or data is missing
+        goals_list = self.current_project_data.get("goals", [])
         
-        # If no goal is selected, we can either default to the first goal 
-        # or warn the user. Let's default to the first goal if available.
-        if not target_goal and self.current_project_data.get("goals"):
-            target_goal = self.current_project_data["goals"][0]
+        if not target_goal and goals_list:
+            target_goal = goals_list[0]
         elif not target_goal:
-            QMessageBox.warning(self, "No Goal", "Please create or select a Goal first.")
+            ghost_alert(self, "SYSTEM ERROR", "NO OPERATIONAL GOAL DETECTED. SELECT A GOAL FIRST.")
             return
 
-        # Create task assigned to the detected goal
-        # Note: We match case-insensitively or via strip to ensure it hits the right bucket
-        actual_goal_name = next((g for g in self.current_project_data["goals"] if g.lower() == target_goal.lower()), target_goal)
+        # 4. Final Verification: Ensure target_goal exists in our data
+        # (This handles any weird edge cases where selection might be stale)
+        actual_goal_name = next(
+            (g for g in goals_list if g.lower() == str(target_goal).lower()), 
+            goals_list[0] if goals_list else "General Operations"
+        )
 
-        new_task = {"goal": actual_goal_name, "task": task_text, "status": "incomplete"}
+        # 5. Create and Save
+        new_task = {
+            "goal": actual_goal_name, 
+            "task": task_text, 
+            "status": "incomplete"
+        }
+        
+        if "tasks" not in self.current_project_data:
+            self.current_project_data["tasks"] = []
+            
         self.current_project_data["tasks"].append(new_task)
-    
+
         if save_project_file(self.username, self.current_project_data, self.fernet):
             self.quick_add_input.clear()
+            
+            # Refresh the UI
             self.display_project(self.project_list.currentItem())
-            # Maintain focus for rapid entry
+            
+            # --- UI QUALITY OF LIFE ---
+            # Restore selection to the same row so the user can rapid-fire tasks into the same goal
+            if self.project_detail_list.count() > curr_row:
+                self.project_detail_list.setCurrentRow(curr_row)
+            
             self.quick_add_input.setFocus()
 
     def display_project(self, item):
@@ -445,137 +499,122 @@ class ProjectsPage(QWidget):
         self.progress.setValue(calc_percentage)
         self.progress_label.setText(f"COMPLETION: {calc_percentage}%")
 
-        def add_styled_item(html_text, raw_text=None, is_header=False, indent=False):
+        def add_styled_item(html_text, raw_text=None, is_header=False, indent=False, goal_owner=None):
             list_item = QListWidgetItem()
+    
             if raw_text:
                 list_item.setData(Qt.UserRole, raw_text)
-            
+    
+            if goal_owner:
+                list_item.setData(Qt.UserRole + 1, goal_owner)
+            elif is_header:
+                clean_goal = html_text.replace("<span style='color: #FFCC00;'>🎯 ", "").replace("</span>", "").strip()
+                list_item.setData(Qt.UserRole + 1, clean_goal)
+
             container = QWidget()
-            # Background transparent so the QListWidget selection highlight shows through
             container.setStyleSheet("background: transparent; border: none;")
             layout = QVBoxLayout(container)
             
+            # --- MARGINS ---
+            left_m = 55 if indent else 25
+            right_m = 45  # Keep that nice wide right margin
+            top_bottom_m = 12 
+            layout.setContentsMargins(left_m, top_bottom_m, right_m, top_bottom_m) 
+            layout.setSpacing(0)
+
             label = QLabel(html_text)
             label.setWordWrap(True)
             
-            # Set width slightly narrower than the list to prevent horizontal scroll popping
-            label.setFixedWidth(self.project_detail_list.width() - 80)
+            # --- DYNAMIC WIDTH & HEIGHT ---
+            # 1. Calc width based on viewport
+            available_width = self.project_detail_list.viewport().width() - left_m - right_m - 20
+            label.setFixedWidth(available_width)
+            
             label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
             
             style = f"color: {T['TEXT_MAIN']}; font-size: {'13px' if is_header else '12px'}; font-family: '{FONT_MAIN}';"
             if is_header: style += "font-weight: bold;"
             label.setStyleSheet(style)
             
-            # Increased vertical padding (15px) for much better breathing room
-            left_m = 55 if indent else 25
-            layout.setContentsMargins(left_m, 15, 25, 15) 
-            layout.setSpacing(0)
             layout.addWidget(label)
             
+            # --- THE FIX: FORCE GEOMETRY UPDATE ---
             self.project_detail_list.addItem(list_item)
             self.project_detail_list.setItemWidget(list_item, container)
             
-            # Recalculate size with a 10px height buffer to prevent cutoffs
-            container.adjustSize()
-            list_item.setSizeHint(container.sizeHint() + QSize(0, 10))
+            # This forces the label to calculate how tall it needs to be 
+            # now that the width is fixed and word-wrap is on.
+            container.adjustSize() 
+            
+            # We add a small vertical buffer (10px) to the height hint 
+            # to ensure the descenders (g, y, p) don't get clipped.
+            final_size = container.sizeHint()
+            list_item.setSizeHint(QSize(final_size.width(), final_size.height() + 10))
 
-        # 1. Metadata
+        # 1. Metadata Headers
         add_styled_item(f"<b style='color:{T['ACCENT_SOLID']}'>FILE:</b> {self.current_project_file}")
         add_styled_item(f"<b style='color:{T['ACCENT_SOLID']}'>DESC:</b> {data.get('description', '...')}")
         deadline = data.get('deadline', 'NOT SET')
         add_styled_item(f"<b style='color:{T['ACCENT_SOLID']}'>DEADLINE:</b> <span style='color: #FF5555;'>{deadline}</span>")
         
-        # 2. Tasks logic
+        # 2. Tasks logic (FIXED: Defined 'html' before passing it)
         assigned_tasks = []
         for goal in data.get("goals", []):
-            # Goal Header
-            add_styled_item(f"<span style='color: #FFCC00;'>🎯 {goal.upper()}</span>", is_header=True)
+            add_styled_item(f"<span style='color: #FFCC00;'>🎯 {goal.upper()}</span>", is_header=True, goal_owner=goal)
+    
             for t in all_tasks:
                 if t.get("goal") == goal:
-                    status_icon = "✅" if t["status"] == "complete" else "⬜"
-                    html = f"<span style='color:#666;'>⤷</span> {status_icon} {t['task']}"
-                    add_styled_item(html, raw_text=t['task'], indent=True)
+                    status_icon = "✅" if t.get("status") == "complete" else "⬜"
+                    # Define the HTML string here!
+                    task_html = f"<span style='color:#666;'>⤷</span> {status_icon} {t['task']}"
+                    add_styled_item(task_html, raw_text=t['task'], indent=True, goal_owner=goal)
                     assigned_tasks.append(t)
 
-        # 3. Uncategorized
+        # 3. Uncategorized (FIXED: Uses internal variable to avoid leakage)
         uncategorized = [t for t in all_tasks if t not in assigned_tasks]
         if uncategorized:
             add_styled_item("<span style='color: #AA88FF;'>📦 UNCATEGORIZED</span>", is_header=True)
             for t in uncategorized:
                 status_icon = "✅" if t["status"] == "complete" else "⬜"
-                html = f"<span style='color:#666;'>⤷</span> {status_icon} {t['task']}"
-                add_styled_item(html, raw_text=t['task'], indent=True)
+                u_html = f"<span style='color:#666;'>⤷</span> {status_icon} {t['task']}"
+                add_styled_item(u_html, raw_text=t['task'], indent=True)
+
 
 
     def add_project(self):
-        """Dynamic dialog for creating a brand new project with infinite goals."""
+        """Dynamic tactical dialog for creating a brand new project."""
         data = {"project": "", "description": "", "deadline": "", "goals": [], "tasks": []} 
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Initialize New Project")
-        dialog.setMinimumWidth(500)
-        main_layout = QVBoxLayout(dialog)
-
-        # Aligned Header
-        form_layout = QFormLayout()
-        name_input = QLineEdit()
-        desc_input = QLineEdit()
-        date_input = QLineEdit()
-        form_layout.addRow("Project Name:", name_input)
-        form_layout.addRow("Description:", desc_input)
-        form_layout.addRow("Deadline:", date_input)
-        main_layout.addLayout(form_layout)
-
-        # Goals Section
-        main_layout.addWidget(QLabel("\nPROJECT GOALS:"))
-        goals_container = QVBoxLayout()
-        goal_inputs = []
-
-        def add_goal_row():
-            row_layout = QHBoxLayout()
-            new_input = QLineEdit()
-            goal_inputs.append(new_input)
-            row_layout.addWidget(new_input)
-            
-            del_btn = QPushButton("✕")
-            del_btn.setFixedWidth(30)
-            del_btn.setStyleSheet("color: red; border: none;")
-            del_btn.clicked.connect(lambda: remove_goal_row(row_layout, new_input))
-            row_layout.addWidget(del_btn)
-            goals_container.addLayout(row_layout)
-
-        def remove_goal_row(layout_to_kill, input_to_kill):
-            goal_inputs.remove(input_to_kill)
-            while layout_to_kill.count():
-                child = layout_to_kill.takeAt(0)
-                if child.widget(): child.widget().deleteLater()
-            goals_container.removeItem(layout_to_kill)
-
-        # Start with one empty goal box
-        add_goal_row()
-        main_layout.addLayout(goals_container)
-
-        add_more_btn = QPushButton("+ Add Another Goal")
-        add_more_btn.setStyleSheet(STYLE_BUTTON)
-        add_more_btn.clicked.connect(add_goal_row)
-        main_layout.addWidget(add_more_btn)
-
-        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        btns.accepted.connect(dialog.accept)
-        btns.rejected.connect(dialog.reject)
-        main_layout.addWidget(btns)
-
+        
+        # 1. Get the name first via tactical prompt
+        name, ok = ghost_prompt(self, "INITIALIZE PLAN", "PROJECT NAME:")
+        if not ok or not name: return
+        
+        # 2. Use TacticalDialog for the heavy lifting
+        dialog = TacticalDialog(self, title=f"CONFIG: {name.upper()}", label="PROJECT PARAMETERS")
+        dialog.input_field.hide()
+        
+        form_layout = QVBoxLayout()
+        desc_input = QLineEdit(); desc_input.setPlaceholderText("Description..."); desc_input.setStyleSheet(STYLE_INPUT)
+        date_input = QLineEdit(); date_input.setPlaceholderText("Deadline..."); date_input.setStyleSheet(STYLE_INPUT)
+        
+        form_layout.addWidget(QLabel("MISSION OBJECTIVE"))
+        form_layout.addWidget(desc_input)
+        form_layout.addWidget(QLabel("TIMELINE"))
+        form_layout.addWidget(date_input)
+        
+        # Goals section with tactical styling
+        main_layout = dialog.container.layout()
+        main_layout.insertLayout(3, form_layout)
+        
         if dialog.exec() == QDialog.Accepted:
-            updated_goals = [i.text().strip() for i in goal_inputs if i.text().strip()]
-            data["project"] = name_input.text().strip()
+            data["project"] = name.strip()
             data["description"] = desc_input.text().strip()
             data["deadline"] = date_input.text().strip()
-            data["goals"] = updated_goals
+            data["goals"] = ["General Operations"] # Default first goal
 
             if save_project_file(self.username, data, self.fernet):
                 self.load_projects()
-                
-                # --- BETTER RE-SELECTION LOGIC ---
-                # Look for the project name we just saved (formatted as a filename)
+                # Auto-select the new project
                 target_name = data["project"].replace(" ", "_").lower()
                 for i in range(self.project_list.count()):
                     if self.project_list.item(i).text().lower() == target_name:
@@ -583,89 +622,81 @@ class ProjectsPage(QWidget):
                         self.display_project(self.project_list.item(i))
                         break
 
-
-    def delete_project(self):
-        if not hasattr(self, "current_project_file"):
-            QMessageBox.warning(self, "No Selection", "Select a project to delete.")
-            return
-            
-        confirm = QMessageBox.question(self, "Confirm", f"Delete {self.current_project_file}?", QMessageBox.Yes | QMessageBox.No)
-        
-        if confirm == QMessageBox.Yes:
-            from project_manager import get_user_project_dir
-            user_dir = get_user_project_dir(self.username)
-            full_filepath = os.path.join(user_dir, self.current_project_file)
-            
-            # Call the manager to delete the real file
-            if delete_project_file(full_filepath):
-                self.load_projects()
-                self.project_detail_list.clear() # Clear the old text
-                self.progress.setValue(0)
-                # Success feedback in terminal for debugging
-                print(f"[GhostDrive] Successfully deleted: {full_filepath}")
-            else:
-                QMessageBox.critical(self, "Error", "Could not delete the file from disk.")
-
-
-    def mark_task_complete(self):
-        if not hasattr(self, "current_project_data"): return
-        selected_item = self.project_detail_list.currentItem()
-    
-        # 🔥 FIX: Get the raw name from UserRole, not .text()
-        task_name = selected_item.data(Qt.UserRole) if selected_item else None
-        if not task_name: return
-    
-        current_row = self.project_detail_list.currentRow()
-
-        for t in self.current_project_data["tasks"]:
-            if t["task"] == task_name:
-                t["status"] = "incomplete" if t["status"] == "complete" else "complete"
-                break
-
-        active_key = self.get_active_fernet(self.current_project_file)
-        if save_project_file(self.username, self.current_project_data, active_key):
-            self.display_project(self.project_list.currentItem())
-            self.project_detail_list.setCurrentRow(current_row)
-
     def edit_task(self):
+        """Replaced QInputDialog with Tactical Prompting"""
         if not hasattr(self, "current_project_data"): return
         selected_item = self.project_detail_list.currentItem()
-        
-        # Pull the raw data we stored earlier
         task_name = selected_item.data(Qt.UserRole) if selected_item else None
         
         if not task_name:
-            QMessageBox.warning(self, "No Selection", "Select a task to edit.")
+            ghost_alert(self, "SYSTEM", "NO TASK SELECTED")
             return
 
         task = next((t for t in self.current_project_data["tasks"] if t["task"] == task_name), None)
         if not task: return
 
-        new_text, ok1 = QInputDialog.getText(self, "Edit Text", "Modify task text:", text=task["task"])
-        if not ok1: return
-        new_status, ok2 = QInputDialog.getItem(self, "Edit Status", "Choose status:", ["incomplete", "complete"], editable=False)
-        if not ok2: return
-
-        task["task"] = new_text
-        task["status"] = new_status
-        save_project_file(self.username, self.current_project_data, self.get_active_fernet(self.current_project_file))
-        self.display_project(self.project_list.currentItem())
+        new_text, ok = ghost_prompt(self, "EDIT TASK", "REWRITE OBJECTIVE:", task["task"])
+        if ok and new_text:
+            task["task"] = new_text
+            save_project_file(self.username, self.current_project_data, self.get_active_fernet(self.current_project_file))
+            self.display_project(self.project_list.currentItem())
 
     def delete_task(self):
+        """Replaced QMessageBox with ghost_alert"""
         if not hasattr(self, "current_project_data"): return
         selected_item = self.project_detail_list.currentItem()
         task_name = selected_item.data(Qt.UserRole) if selected_item else None
         
         if not task_name:
-            QMessageBox.warning(self, "No Selection", "Select a task to delete.")
+            ghost_alert(self, "SYSTEM", "SELECT TASK TO PURGE")
             return
 
-        confirm = QMessageBox.question(self, "Confirm Deletion", f"Delete task:\n'{task_name}'?", QMessageBox.Yes | QMessageBox.No)
-        if confirm != QMessageBox.Yes: return
+        if ghost_alert(self, "CONFIRM PURGE", f"ERASE TASK: {task_name}?"):
+            self.current_project_data["tasks"] = [t for t in self.current_project_data["tasks"] if t["task"] != task_name]
+            save_project_file(self.username, self.current_project_data, self.get_active_fernet(self.current_project_file))
+            self.display_project(self.project_list.currentItem())
 
-        self.current_project_data["tasks"] = [t for t in self.current_project_data["tasks"] if t["task"] != task_name]
-        save_project_file(self.username, self.current_project_data, self.get_active_fernet(self.current_project_file))
-        self.display_project(self.project_list.currentItem())
+    def delete_project(self):
+        """Replaced QMessageBox with ghost_alert"""
+        if not hasattr(self, "current_project_file"):
+            ghost_alert(self, "SYSTEM", "NO PLAN SELECTED")
+            return
+            
+        if ghost_alert(self, "DESTRUCT SEQUENCE", f"PERMANENTLY DELETE {self.current_project_file}?"):
+            from project_manager import get_user_project_dir
+            user_dir = get_user_project_dir(self.username)
+            full_filepath = os.path.join(user_dir, self.current_project_file)
+            
+            if delete_project_file(full_filepath):
+                self.load_projects()
+                self.project_detail_list.clear()
+                self.progress.setValue(0)
+            else:
+                ghost_alert(self, "ERROR", "FILE LOCK: COULD NOT DELETE")
+
+    def mark_task_complete(self):
+        """Toggles the completion status of the selected task."""
+        if not hasattr(self, "current_project_data"):
+            return
+
+        selected_item = self.project_detail_list.currentItem()
+        # Retrieve the raw task name stored in UserRole
+        task_name = selected_item.data(Qt.UserRole) if selected_item else None
+
+        if not task_name:
+            ghost_alert(self, "SYSTEM", "SELECT A TASK TO COMPLETE")
+            return
+
+        # Find the task in the data and toggle status
+        for task in self.current_project_data["tasks"]:
+            if task["task"] == task_name:
+                # Toggle: if complete -> incomplete, if incomplete -> complete
+                task["status"] = "complete" if task["status"] == "incomplete" else "incomplete"
+                break
+
+        # Save and refresh the UI
+        if save_project_file(self.username, self.current_project_data, self.fernet):
+            self.display_project(self.project_list.currentItem())
 
 
     def add_task(self):

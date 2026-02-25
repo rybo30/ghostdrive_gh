@@ -1,3 +1,5 @@
+# [inventory_manager.py]
+
 import os
 import csv
 import json
@@ -33,11 +35,14 @@ def list_inventory_sheets(username):
     return sheets if sheets else ["inventory"]
 
 def rename_inventory_file(username, old_id, new_id):
-    """Renames the physical .enc file on disk."""    
-    user_dir = os.path.join(INVENTORY_DIR, username)
-    old_path = os.path.join(user_dir, f"{username}_{old_id}.enc")
-    new_path = os.path.join(user_dir, f"{username}_{new_id}.enc")
+    """Renames the physical .enc file on disk using the correct pathing logic."""    
+    # Use the helper to get absolute paths so we don't guess prefixes
+    old_path = get_inventory_path(username, old_id)
+    new_path = get_inventory_path(username, new_id)
     
+    if not os.path.exists(old_path):
+        return False, f"Source file not found: {old_id}"
+        
     if os.path.exists(new_path):
         return False, "A sheet with that name already exists."
     

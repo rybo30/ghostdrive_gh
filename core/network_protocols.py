@@ -78,30 +78,37 @@ def _windows_reconnect_wifi() -> str:
 
 
 def _windows_scan_networks() -> str:
-    """Scan for available WiFi networks on Windows."""
+    """Scan and return a formatted table of WiFi networks on Windows."""
     try:
         result = subprocess.run(
-            ["netsh", "wlan", "show", "networks", "mode=bssid"],
-            capture_output=True,
-            text=True,
-            timeout=15
+            ["netsh", "wlan", "show", "networks"],
+            capture_output=True, text=True, timeout=15
         )
         
-        if result.returncode != 0:
-            return f"❌ Scan failed: {result.stderr}"
+        networks = []
+        current_ssid = "Unknown"
         
-        # Parse the output for cleaner display
-        output = result.stdout
-        if not output.strip():
-            return "📡 No networks found (WiFi adapter may be disabled)."
-        
-        return f"📡 Available Networks:\n\n{output}"
-        
-    except subprocess.TimeoutExpired:
-        return "❌ Network scan timed out."
-    except Exception as e:
-        return f"❌ Scan failed: {e}"
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if line.startswith("SSID"):
+                current_ssid = line.split(":", 1)[1].strip() or "Hidden Network"
+            elif "Authentication" in line:
+                auth = line.split(":", 1)[1].strip()
+                # We append once we have the core info
+                networks.append({"ssid": current_ssid, "security": auth})
 
+        if not networks:
+            return "📡 [SIGNAL LOST]: No networks detected in range."
+
+        # Build tactical table
+        header = f"{'SSID':<25} | {'SECURITY':<15}"
+        divider = "-" * len(header)
+        rows = [f"{n['ssid'][:25]:<25} | {n['security']:<15}" for n in networks]
+        
+        return f"📡 ACTIVE SPECTRUM SCAN:\n\n{header}\n{divider}\n" + "\n".join(rows)
+
+    except Exception as e:
+        return f"❌ SCAN ERROR: {e}"
 
 def _windows_get_connection_status() -> str:
     """Get current WiFi connection status on Windows."""
@@ -225,38 +232,36 @@ def _linux_reconnect_wifi() -> str:
 
 
 def _linux_scan_networks() -> str:
-    """Scan for available WiFi networks on Linux."""
-    nm = get_network_manager()
-    
-    if nm == "nmcli":
-        try:
-            # Force a rescan
-            subprocess.run(
-                ["nmcli", "device", "wifi", "rescan"],
-                capture_output=True,
-                timeout=10
-            )
-            
-            # Get list of networks
-            result = subprocess.run(
-                ["nmcli", "-f", "SSID,SIGNAL,SECURITY", "device", "wifi", "list"],
-                capture_output=True,
-                text=True,
-                timeout=15
-            )
-            
-            if result.returncode != 0:
-                return f"❌ Scan failed: {result.stderr}"
-            
-            return f"📡 Available Networks:\n\n{result.stdout}"
-            
-        except subprocess.TimeoutExpired:
-            return "❌ Network scan timed out."
-        except Exception as e:
-            return f"❌ Scan failed: {e}"
-    
-    else:
-        return "❌ No supported network manager found for scanning."
+    """Scan and return a formatted table of WiFi networks on Linux."""
+    try:
+        # Force rescan
+        subprocess.run(["nmcli", "device", "wifi", "rescan"], capture_output=True, timeout=5)
+        
+        # Get terse list: SSID:SIGNAL:SECURITY
+        result = subprocess.run(
+            ["nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY", "device", "wifi", "list"],
+            capture_output=True, text=True, timeout=10
+        )
+        
+        lines = result.stdout.strip().split('\n')
+        if not lines or not lines[0]:
+            return "📡 [SIGNAL LOST]: No networks detected."
+
+        header = f"{'SSID':<25} | {'SIGNAL':<8} | {'SECURITY':<15}"
+        divider = "-" * len(header)
+        
+        formatted_rows = []
+        for line in lines:
+            parts = line.split(':')
+            if len(parts) >= 3:
+                ssid, signal, security = parts[0], parts[1], parts[2]
+                sig_bar = "█" * (int(signal) // 20) # Simple visual signal bar
+                formatted_rows.append(f"{ssid[:25]:<25} | {signal.strip() + '%':<8} | {security:<15}")
+
+        return f"📡 ACTIVE SPECTRUM SCAN:\n\n{header}\n{divider}\n" + "\n".join(formatted_rows)
+
+    except Exception as e:
+        return f"❌ SCAN ERROR: {e}"
 
 
 def _linux_get_connection_status() -> str:

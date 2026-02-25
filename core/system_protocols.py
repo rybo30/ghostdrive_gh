@@ -328,7 +328,22 @@ def status_report() -> str:
             "=" * 40,
         ])
         
-        return "\n".join(lines)
+        # Convert the list of lines into a single string
+        final_output = "\n".join(lines)
+
+        # Tactical Formatting for HTML Display
+        # 1. Replace headers with Bold + Underline
+        headers = ["📋 SYSTEM INFO", "🔋 POWER", "💻 CPU", "🧠 MEMORY", "💾 STORAGE", "🎮 GPU", "🌐 NETWORK"]
+        for header in headers:
+            final_output = final_output.replace(header, f"<br><b>{header}</b><br>"+ "—"*20)
+
+        # 2. Turn newlines into HTML breaks
+        final_output = final_output.replace("\n", "<br>")
+
+        # 3. Add non-breaking spaces to preserve the indent of the bullets
+        final_output = final_output.replace("  •", "&nbsp;&nbsp;[>]")
+
+        return f"<div style='font-family: monospace; line-height: 1.4;'>{final_output}</div>"
         
     except Exception as e:
         return f"❌ Status report failed: {e}"

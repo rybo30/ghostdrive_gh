@@ -1,3 +1,5 @@
+# [inventory_page.py]
+
 import os
 import sys
 from PySide6.QtWidgets import (
@@ -24,7 +26,7 @@ from inventory_manager import (
 from .style_config import (
     FONT_FAMILY, FONT_SIZE,
     COLOR_BG, COLOR_FG, COLOR_ACCENT, COLOR_BUTTON, COLOR_HIGHLIGHT,
-    STYLE_LABEL, STYLE_BUTTON, COLOR_PAGE_BG, COLOR_BORDER
+    STYLE_LABEL, STYLE_BUTTON, COLOR_PAGE_BG, COLOR_BORDER, ghost_prompt, ghost_alert, TacticalDialog
 )
 
 class InventoryPage(QWidget):
@@ -177,58 +179,6 @@ class InventoryPage(QWidget):
         self.data = payload["data"]
         self.refresh_table()
 
-
-    def rename_current_sheet(self):
-        """Renames the current active sheet file and updates the UI."""
-        if self.current_sheet_name == "inventory":
-            QMessageBox.information(self, "Protected", "The primary 'Inventory' sheet cannot be renamed.")
-            return
-
-        old_name = self.current_sheet_name.replace("_", " ").capitalize()
-        new_name, ok = QInputDialog.getText(self, "Rename Sheet", "New name:", text=old_name)
-        
-        if ok and new_name.strip():
-            new_sheet_id = new_name.strip().lower().replace(" ", "_")
-            
-            # Use the manager to rename the file on disk
-            from inventory_manager import rename_inventory_file
-            success, error = rename_inventory_file(self.username, self.current_sheet_name, new_sheet_id)
-            
-            if success:
-                self.current_sheet_name = new_sheet_id
-                self.load_sheet_list()
-            else:
-                QMessageBox.critical(self, "Rename Failed", f"Could not rename: {error}")
-
-    def create_new_sheet(self):
-        """Prompt user for a name and create a new inventory file."""
-        name, ok = QInputDialog.getText(self, "New Sheet", "Sheet Name (e.g. Garage, Home):")
-        if ok and name.strip():
-            # Clean the name for the filename
-            sheet_id = name.strip().lower().replace(" ", "_")
-            
-            # 1. Prepare default data for the new sheet
-            new_payload = {
-                "schema": ["name", "quantity", "location", "last_checked"], 
-                "data": []
-            }
-            
-            # 2. Save it to disk immediately so it exists for load_sheet_list to find
-            try:
-                save_inventory(self.username, new_payload, self.fernet, sheet_id)
-                
-                # 3. Refresh the tab list to show the new sheet
-                self.load_sheet_list()
-                
-                # 4. Switch to the new tab
-                for i in range(self.tabs.count()):
-                    if self.tabs.tabText(i).lower().replace(" ", "_") == sheet_id:
-                        self.tabs.setCurrentIndex(i)
-                        break
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Could not create sheet: {e}")
-
-
     def refresh_table(self):
         self.table.clear()
         self.table.setColumnCount(len(self.schema))
@@ -258,12 +208,6 @@ class InventoryPage(QWidget):
                     break
             self.table.setRowHidden(row, not match)
 
-    def get_selected_index(self):
-        selected = self.table.currentRow()
-        if selected == -1:
-            QMessageBox.warning(self, "Invalid", "Select an item first.")
-            return None
-        return selected
 
     # CRUD Operations
     def add_item(self):
@@ -287,106 +231,198 @@ class InventoryPage(QWidget):
             save_inventory(self.username, {"schema": self.schema, "data": self.data}, self.fernet, self.current_sheet_name)
             self.refresh_table()
 
+
+    # --- UPDATED RENAME LOGIC ---
+    def rename_current_sheet(self):
+        """Renames the current active sheet file using Ghost prompts with pre-save safety."""
+        if self.current_sheet_name == "inventory":
+            ghost_alert(self, "ACCESS DENIED", "The primary 'Inventory' sheet is protected and cannot be renamed.")
+            return
+
+        # 1. TACTICAL PRE-SAVE: Ensure the file physically exists before renaming
+        save_inventory(self.username, {"schema": self.schema, "data": self.data}, self.fernet, self.current_sheet_name)
+
+        old_name_display = self.current_sheet_name.replace("_", " ").capitalize()
+        new_name, ok = ghost_prompt(self, "RENAME PROTOCOL", "ENTER NEW DESIGNATION:", placeholder=old_name_display)
+        
+        if ok and new_name.strip():
+            new_sheet_id = new_name.strip().lower().replace(" ", "_")
+            from inventory_manager import rename_inventory_file
+            
+            # 2. Attempt rename via manager
+            success, error = rename_inventory_file(self.username, self.current_sheet_name, new_sheet_id)
+            
+            if success:
+                self.current_sheet_name = new_sheet_id
+                self.load_sheet_list() # Refresh tabs to show new name
+            else:
+                # This will now only trigger for genuine OS errors, not missing files
+                ghost_alert(self, "SYSTEM ERROR", f"Rename failed: {error}")
+
+    # --- UPDATED CREATE LOGIC ---
+    def create_new_sheet(self):
+        """Prompt user for a name and create a new inventory file via Ghost prompt."""
+        name, ok = ghost_prompt(self, "NEW DATA SHEET", "ASSIGN SHEET NAME (e.g. Garage, Home):")
+        if ok and name.strip():
+            sheet_id = name.strip().lower().replace(" ", "_")
+            new_payload = {
+                "schema": ["name", "quantity", "location", "last_checked"], 
+                "data": []
+            }
+            try:
+                save_inventory(self.username, new_payload, self.fernet, sheet_id)
+                self.load_sheet_list()
+                for i in range(self.tabs.count()):
+                    if self.tabs.tabText(i).lower().replace(" ", "_") == sheet_id:
+                        self.tabs.setCurrentIndex(i)
+                        break
+            except Exception as e:
+                ghost_alert(self, "FATAL ERROR", f"Could not initialize sheet: {e}")
+
+    # --- UPDATED SELECTION LOGIC ---
+    def get_selected_index(self):
+        selected = self.table.currentRow()
+        if selected == -1:
+            ghost_alert(self, "SYSTEM NOTICE", "Target acquisition failed. Select a row first.")
+            return None
+        return selected
+
+    # --- UPDATED DELETE LOGIC ---
     def delete_item(self):
         idx = self.get_selected_index()
         if idx is None: return
-        confirm = QMessageBox.question(self, "Confirm Delete", f"Delete item?")
-        if confirm == QMessageBox.Yes:
+        # ghost_alert automatically turns red/TERMINATE if "DELETE" is in title
+        confirm = ghost_alert(self, "CONFIRM DELETE", "Purge this item from local storage?")
+        if confirm:
             del self.data[idx]
-            save_inventory(self.username, {"schema": self.schema, "data": self.data}, self.fernet)
+            save_inventory(self.username, {"schema": self.schema, "data": self.data}, self.fernet, self.current_sheet_name)
             self.refresh_table()
 
+    # --- UPDATED EXPORT/IMPORT LOGIC ---
     def export_csv(self):
         try:
-            # 1. Grab the name of the active tab (e.g., "Garage")
             current_sheet = self.tabs.tabText(self.tabs.currentIndex())
-        
-            # 2. Use the manager to handle the naming and saving
             save_path = export_inventory_to_csv(
                 username=self.username, 
                 payload={"schema": self.schema, "data": self.data},
-                sheet_name=current_sheet  # <--- CRITICAL
+                sheet_name=current_sheet 
             )
-            QMessageBox.information(self, "Export Successful", f"Exported {current_sheet} to:\n{save_path}")
+            ghost_alert(self, "EXPORT COMPLETE", f"Data uplinked to:\n{save_path}")
         except Exception as e:
-            QMessageBox.critical(self, "Export Failed", str(e))
+            ghost_alert(self, "EXPORT FAILED", str(e))
 
     def import_csv(self):
+        """Import CSV and automatically expand the schema to include new columns found in the file."""
         try:
             current_sheet = self.tabs.tabText(self.tabs.currentIndex())
+            confirm = ghost_alert(self, "IMPORT OVERWRITE", 
+                f"Proceed with importing into '{current_sheet}'?")
         
-            confirm = QMessageBox.question(self, "Confirm Overwrite", 
-                f"Importing will overwrite your '{current_sheet}' data. Continue?", 
-                QMessageBox.Yes | QMessageBox.No)
-        
-            if confirm != QMessageBox.Yes: return  
+            if not confirm: return  
 
-            # Create the dictionary to pass
-            temp_payload = {"schema": self.schema, "data": self.data}
-        
-            # FIX: Change 'payload_ref' to 'current_payload' to match the manager function
-            success, result = import_inventory_from_csv(
-                username=self.username,
-                fernet=self.fernet,
-                current_payload=temp_payload, # <--- FIXED NAME HERE
-                sheet_name=current_sheet
-            )
+            user_dir = os.path.join(INVENTORY_DIR, self.username)
+            path = os.path.join(user_dir, f"inv_{self.current_sheet_name.lower()}_export.csv")
 
-            if success:
-                # Sync the UI variables back
-                self.schema = temp_payload["schema"]
-                self.data = temp_payload["data"]
-                self.refresh_table()
-                QMessageBox.information(self, "Import Successful", f"'{current_sheet}' updated ({result} items).")
-            else:
-                QMessageBox.warning(self, "Import Failed", result) # result is the error message if success is False
+            if not os.path.exists(path):
+                ghost_alert(self, "FILE MISSING", f"Place CSV at: {path}")
+                return
 
+            import csv
+            with open(path, "r", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                new_data = list(reader)
+                # SCHEMA RECOVERY: Get headers from the CSV file itself
+                if new_data:
+                    detected_schema = list(reader.fieldnames)
+                else:
+                    detected_schema = self.schema
+
+            # Update the local state
+            self.schema = detected_schema
+            self.data = new_data
+            
+            # Save the updated schema AND data back to encrypted storage
+            save_inventory(self.username, {"schema": self.schema, "data": self.data}, self.fernet, self.current_sheet_name)
+            
+            self.refresh_table()
+            ghost_alert(self, "IMPORT SUCCESS", f"Synchronized {len(new_data)} items and {len(self.schema)} columns.")
+            
         except Exception as e:
-            QMessageBox.critical(self, "Import Failed", str(e))
+            ghost_alert(self, "SYSTEM CRITICAL", str(e))
 
+    # --- UPDATED COLUMNS LOGIC ---
     def edit_columns(self):
-        cols, ok = QInputDialog.getMultiLineText(self, "Edit Columns", "Column names (one per line):", "\n".join(self.schema)) 
-        if ok:
+        """Allows editing column names and ensures existing names are displayed in the prompt."""
+        current_cols_text = "\n".join(self.schema)
+        
+        # We create the dialog manually to ensure the text is SET before exec
+        dialog = TacticalDialog(
+            self, 
+            title="COLUMN CONFIG", 
+            label="EDIT DESIGNATIONS (ONE PER LINE):", 
+            is_multiline=True
+        )
+        # FORCE the current columns into the text box
+        dialog.input_field.setPlainText(current_cols_text)
+        
+        if dialog.exec() == QDialog.Accepted:
+            cols = dialog.input_field.toPlainText()
             new_schema = [c.strip().lower().replace(" ", "_") for c in cols.split("\n") if c.strip()]
+            
             if not new_schema: return
+
+            # Data Mapping: Keep data for columns that stayed the same
+            new_data = []
+            for row in self.data:
+                # If count matches, map by index; otherwise, map by key name
+                if len(new_schema) == len(self.schema):
+                    updated_row = {new_schema[i]: row.get(self.schema[i], "") for i in range(len(new_schema))}
+                else:
+                    updated_row = {k: row.get(k, "") for k in new_schema}
+                new_data.append(updated_row)
+            
+            self.data = new_data
             self.schema = new_schema
-            save_inventory(self.username, {"schema": self.schema, "data": self.data}, self.fernet)
+            save_inventory(self.username, {"schema": self.schema, "data": self.data}, self.fernet, self.current_sheet_name)
             self.refresh_table()
 
-    # --- THEMED INNER DIALOG ---
-    class item_dialog(QDialog):
+
+    # --- RE-ENGINEERED THEMED DIALOG ---
+    class item_dialog(TacticalDialog):
         def __init__(self, schema, item=None):
-            super().__init__()
-            self.setWindowTitle("Item Details")
+            # 1. Initialize TacticalDialog with Ghost styling
+            super().__init__(title="ITEM DETAILS", label="EDIT ATTRIBUTES:")
             self.schema = schema
             self.inputs = {}
-            layout = QFormLayout(self)
             
-            # Apply Master Theme to Dialog
-            self.setStyleSheet(f"background-color: {COLOR_BG}; color: {COLOR_FG}; font-family: '{FONT_FAMILY}';")
-
+            # 2. Setup the Form
+            content_layout = QFormLayout()
             for field in schema:
                 if field == "last_checked": continue
                 val = item.get(field, "") if item else ""
                 line_edit = QLineEdit(str(val))
                 
-                # Input styling
                 line_edit.setStyleSheet(f"""
-                    background-color: {COLOR_BUTTON}; 
-                    color: {COLOR_FG}; 
-                    border: 1px solid {COLOR_ACCENT};
-                    padding: 4px;
+                    background-color: rgba(0,0,0,0.3); 
+                    color: {COLOR_ACCENT}; 
+                    border: 1px solid {COLOR_BORDER};
+                    padding: 8px;
+                    font-family: 'Consolas';
                 """)
                 self.inputs[field] = line_edit
                 
-                label = QLabel(f"{field.capitalize().replace('_', ' ')}:")
-                label.setStyleSheet(f"color: {COLOR_FG}; font-weight: bold;")
-                layout.addRow(label, line_edit)
+                label_widget = QLabel(f"{field.upper().replace('_', ' ')}:")
+                label_widget.setStyleSheet(f"color: {COLOR_FG}; font-size: 10px; font-weight: bold;")
+                content_layout.addRow(label_widget, line_edit)
 
-            btn = QPushButton("Save")
-            btn.setStyleSheet(STYLE_BUTTON)
-            btn.clicked.connect(self.accept)
-            layout.addWidget(btn)
+            # 3. Inject Form & Cleanup UI
+            self.input_field.hide() 
+            self.container.layout().insertLayout(3, content_layout)
+            
+            # 4. Final Polish & Logic Connection
+            self.confirm_btn.setText("SAVE CHANGES")
+            self.confirm_btn.clicked.connect(self.accept)
+            self.cancel_btn.clicked.connect(self.reject)
 
         def get_data(self):
             return {field: widget.text() for field, widget in self.inputs.items()}
