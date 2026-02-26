@@ -161,7 +161,7 @@ User Request: "{user_prompt}"
 
 Task:
 1. Provide a new perspective from your expertise in {field}.
-2. Bring new ideas or contrast your view with the previous expert to ensure a unique contribution.
+2. Bring new ideas and ensure a unique contribution.
 3. Try your best, no wrong answers.
 Response:"""
 

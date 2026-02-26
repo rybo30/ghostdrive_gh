@@ -322,6 +322,22 @@ class ChatPage(QWidget):
         self.chat_area.insertHtml(html)
         self.chat_area.moveCursor(QTextCursor.End)
 
+    def append_image_to_chat(self, image_path):
+        """Renders an attached image directly into the chat display."""
+        if not image_path: return
+        
+        # We use a standard width to keep the chat tidy
+        html = f"""
+        <br>
+        <div style='margin-left: 20px;'>
+            <img src='{image_path}' width='300'>
+        </div>
+        <br>
+        """
+        self.chat_area.insertHtml(html)
+        self.chat_area.moveCursor(QTextCursor.End)
+
+
     def handle_prompt(self):
         prompt = self.input_line.toPlainText().strip()
         image_path = self.current_image_path
