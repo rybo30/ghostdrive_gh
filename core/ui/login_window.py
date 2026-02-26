@@ -1,7 +1,6 @@
-# [login_window.py]
-
 import os
 import sys
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QLineEdit, 
     QPushButton, QMessageBox, QFrame, QApplication
@@ -14,11 +13,11 @@ from core.identity import get_hardware_locked_identity
 # --- ORIGINAL SYSTEM PATHS ---
 try:
     from ghostvault import (
-        get_vault_paths, load_key_from_passphrase, create_new_user, user_exists
+        get_vault_paths, load_key_from_passphrase, create_new_user, user_exists, decrypt_vault
     )
 except ImportError:
     from Everything_else.ghostvault import (
-        get_vault_paths, load_key_from_passphrase, create_new_user, user_exists
+        get_vault_paths, load_key_from_passphrase, create_new_user, user_exists, decrypt_vault
     )
 
 # --- THEME CONFIG ---
@@ -57,7 +56,6 @@ class LoginWindow(QWidget):
         self.passphrase_input.setPlaceholderText("SECURITY PASSPHRASE")
         self.passphrase_input.setEchoMode(QLineEdit.EchoMode.Password)
 
-        # Status indicator (e.g., "Logging username in...")
         self.status_label = QLabel("")
         self.status_label.setAlignment(Qt.AlignCenter)
         self.status_label.setStyleSheet(f"color: {T['TEXT_DIM']}; font-size: 10px; font-weight: 700; letter-spacing: 1px;")
@@ -120,26 +118,20 @@ class LoginWindow(QWidget):
     def create_account(self):
         username = self.username_input.text().strip()
         passphrase = self.passphrase_input.text().strip()
-
         if not username or not passphrase or user_exists(username):
             self.shake_feedback()
             return
-
         try:
             create_new_user(username, passphrase)
             self.login_btn.setText("IDENTITY SECURED")
             self.login_btn.setProperty("success", True)
             self.login_btn.style().unpolish(self.login_btn)
             self.login_btn.style().polish(self.login_btn)
-            
             self.status_label.setText(f"LOGGING {username.upper()} IN...")
-            
             self.username_input.setEnabled(False)
             self.passphrase_input.setEnabled(False)
             self.create_btn.hide()
-
             QTimer.singleShot(1200, self.try_login)
-            
         except Exception as e:
             self.show_tactical_msg("Failed", str(e))
 
@@ -151,17 +143,21 @@ class LoginWindow(QWidget):
             self.shake_feedback()
             return
 
-        # Status update
-        self.status_label.setText(f"LOGGING {username.upper()} IN...")
-        QApplication.processEvents() # Now defined via imports
+        if not user_exists(username):
+            self.status_label.setText("IDENTITY NOT FOUND")
+            self.shake_feedback()
+            return
 
         try:
-            _, salt_path = get_vault_paths(username)
+            vault_path, salt_path = get_vault_paths(username)
             key = load_key_from_passphrase(passphrase, salt_path)
             fernet = Fernet(key)
 
+            vault_data = decrypt_vault(fernet, vault_path)
+            if isinstance(vault_data, dict) and vault_data.get("ERROR") == "DECRYPTION_FAILURE":
+                raise ValueError("Wrong Passphrase")
+
             identity_data = get_hardware_locked_identity(username, passphrase, salt_path)
-            
             app = QApplication.instance()
             app.ghost_id = identity_data["identity_pub_hex"]
             app.private_key = identity_data["sync_priv"]
@@ -169,11 +165,8 @@ class LoginWindow(QWidget):
             self.on_login_success(username, passphrase, fernet)
             self.close()
 
-        except Exception as e:
-            print(f"--- LOGIN CRASH: {e} ---") # THIS WILL SHOW THE REAL ERROR IN TERMINAL
-            import traceback
-            traceback.print_exc()
-            self.status_label.setText("AUTHENTICATION FAILED")
+        except Exception:
+            self.status_label.setText("INVALID PASSPHRASE")
             self.shake_feedback()
 
     def shake_feedback(self):
