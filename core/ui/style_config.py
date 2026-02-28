@@ -108,8 +108,10 @@ class TacticalDialog(QDialog):
         super().__init__(parent)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self._drag_pos = QPoint()
         
+        self.setFixedWidth(450)
+        self._drag_pos = QPoint()
+
         GOLD = T['PROTOCOL_GOLD']
         BG = T['PROTOCOL_BG']
         LINE = T['HUD_LINE']
