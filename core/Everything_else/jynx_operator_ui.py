@@ -92,14 +92,17 @@ def run_update_protocol():
         with open(FAIL_LOG, 'w') as f: f.write(str(error_count))
         return f"❌ Update protocol interrupted. Error logged ({error_count}/3)."
 
+# =============================================================================
+# GitHub Surgical Sync
+# =============================================================================
 def run_github_surgical_sync():
     r"""
     Downloads the public GhostDrive repo and overlays the 'core' folder
     onto the USB root (D:\), preserving local .gguf files.
     """
-    # Path Logic: script is at D:\core\Everything_else\jynx_operator_ui.py
-    # current_dir = Everything_else -> parent = core -> parent = D:\
+    # 1. Determine Paths
     current_dir = os.path.dirname(os.path.abspath(__file__))
+    # Go up levels to reach D:\ from D:\core\Everything_else\
     USB_ROOT = os.path.dirname(os.path.dirname(current_dir))
     LOCAL_CORE = os.path.join(USB_ROOT, "core")
 
@@ -108,53 +111,64 @@ def run_github_surgical_sync():
     STAGING_DIR = os.path.join(USB_ROOT, ".gh_staging")
 
     try:
+        # 2. Aggressive Network Handshake
         print("📡 Initializing network handshake...")
         reconnect_to_wifi()
         
+        # Give the OS 5 seconds to settle DNS/IP assignment
         print("⏳ Waiting for DNS resolution (5s)...")
         time.sleep(5) 
         
-        # Download with retry logic
+        # 3. Download Payload with Retries
         max_retries = 3
         r_req = None
+        
         for attempt in range(max_retries):
             try:
                 print(f"📥 Fetching updates (Attempt {attempt+1}/{max_retries})...")
                 r_req = requests.get(REPO_URL, stream=True, timeout=20)
                 r_req.raise_for_status()
-                break
-            except Exception:
+                break # Success!
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
                 if attempt < max_retries - 1:
+                    print("⚠️ Connection failed. Retrying handshake...")
+                    reconnect_to_wifi()
                     time.sleep(5)
-                    continue
-                raise
+                else:
+                    raise # Rethrow error if final attempt fails
 
+        # 4. Save Payload
         with open(TEMP_ZIP, 'wb') as f:
             for chunk in r_req.iter_content(chunk_size=8192):
                 f.write(chunk)
 
+        # 5. Extract to Shadow Staging
         if os.path.exists(STAGING_DIR):
             shutil.rmtree(STAGING_DIR)
         
         with zipfile.ZipFile(TEMP_ZIP, 'r') as z:
             z.extractall(STAGING_DIR)
 
-        # Locate extracted core
+        # 6. Locate Source and Target
         extracted_root = os.path.join(STAGING_DIR, "ghostdrive_gh-main")
         source_core = os.path.join(extracted_root, "core")
 
         if not os.path.exists(source_core):
             return "❌ Error: Could not locate 'core' in the repository payload."
 
-        # Execute Overlay
+        if not os.path.exists(LOCAL_CORE):
+            return f"❌ Target Error: {LOCAL_CORE} not found."
+
+        # 7. Execute Surgical Overlay
         print(f"⚡ Target identified: {LOCAL_CORE}")
+        print("⚡ Overlaying system files...")
         copy_tree(source_core, LOCAL_CORE)
 
-        # Cleanup
+        # 8. Cleanup
         if os.path.exists(TEMP_ZIP): os.remove(TEMP_ZIP)
         if os.path.exists(STAGING_DIR): shutil.rmtree(STAGING_DIR)
 
-        return "✅ Sync Complete. System updated successfully."
+        return "✅ Sync Complete. Root core updated."
 
     except Exception as e:
         if os.path.exists(TEMP_ZIP): os.remove(TEMP_ZIP)
